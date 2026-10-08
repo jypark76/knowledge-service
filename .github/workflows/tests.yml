@@ -37,7 +37,8 @@ jobs:
 
       - run: pip install -r requirements-dev.txt
 
-      - run: pytest -v
+      # The Kubernetes file checks run in their own job below, so skip them here.
+      - run: pytest -v --ignore=tests/test_k8s_manifests.py
 
   # In plain English: the second job. It starts a real, throwaway Postgres in a
   # container, builds it the same way the cluster does (the same db/init.sql and
@@ -122,3 +123,29 @@ jobs:
       - name: Show the database log
         if: failure()
         run: docker logs test-db
+
+  # In plain English: the third job. It checks the Kubernetes files before they
+  # ever reach a cluster: the two shell scripts are checked with shellcheck, and
+  # the final laptop files are built and checked against our rules (right
+  # namespace, no Secret, fixed image tags, locked-down service pod and so on).
+  # REQUIRE_KUBECTL=1 makes a missing kubectl a failure and not a quiet skip.
+  kubernetes-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - run: pip install -r requirements-dev.txt
+
+      - name: Check the shell scripts
+        run: shellcheck k8s/deploy.sh k8s/overlays/local/set-app-password.sh
+
+      - name: Check the rendered Kubernetes files
+        env:
+          REQUIRE_KUBECTL: "1"
+        run: pytest -v tests/test_k8s_manifests.py

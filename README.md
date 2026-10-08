@@ -50,6 +50,11 @@ python -m venv .venv
 The same tests run on every pull request, and the `main` branch rules require
 them to pass before a merge.
 
+`tests/test_k8s_manifests.py` builds the Kubernetes files for the laptop settings and
+checks them against our rules (namespace, no Secret, fixed image tags, a locked-down
+service pod and more). It needs `kubectl` and is skipped without it. Its self-tests
+feed it deliberately broken files, so it cannot pass by never complaining.
+
 `tests/test_database.py` needs a real database and is skipped when none is
 configured. In the pipeline it runs against a throwaway Postgres that is built
 from `db/init.sql` and the first-start password script, then destroyed. The
