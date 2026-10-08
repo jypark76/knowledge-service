@@ -50,6 +50,29 @@ python -m venv .venv
 The same tests run on every pull request, and the `main` branch rules require
 them to pass before a merge.
 
+`tests/test_database.py` needs a real database and is skipped when none is
+configured. In the pipeline it runs against a throwaway Postgres that is built
+from `db/init.sql` and the first-start password script, then destroyed. The
+service login cannot delete, so these tests leave rows behind and refuse to run
+unless the database is named `knowledge_test`. To run them yourself, start a
+temporary container (use any passwords you like) and point the settings at it:
+
+```
+# In Git Bash on Windows, put MSYS_NO_PATHCONV=1 before "docker run". Without it
+# Git Bash rewrites the folder paths and the setup scripts are never found.
+docker run -d --name test-db \
+  -e POSTGRES_PASSWORD=admin -e POSTGRES_DB=knowledge_test -e APP_PASSWORD=app \
+  -v "$PWD/db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro" \
+  -v "$PWD/k8s/overlays/local/set-app-password.sh:/docker-entrypoint-initdb.d/02-set-app-password.sh:ro" \
+  -p 5432:5432 pgvector/pgvector:0.8.7-pg17
+
+# wait about 20 seconds for the database to finish setting itself up, then:
+DB_HOST=localhost DB_NAME=knowledge_test DB_USER=knowledge_app DB_PASSWORD=app \
+  .venv/Scripts/python -m pytest -v tests/test_database.py
+
+docker rm -f test-db
+```
+
 ## Running on Kubernetes
 
 The cluster files live in `k8s/`:

@@ -1,0 +1,163 @@
+# In plain English: these tests run the real service against a real Postgres
+# database, so they check the parts the other tests cannot: saving, listing and
+# searching for real, and that the service's limited login really cannot change
+# or delete anything.
+#
+# SAFETY: the service's login cannot delete, so these tests cannot clean up after
+# themselves. Every test adds rows with a brand new random assignment ID and
+# leaves them behind. That is fine for a throwaway database and a disaster for a
+# real one. So the tests refuse to run unless the database is named
+# "knowledge_test". The pipeline creates a fresh one for every run and throws it
+# away afterwards. To run these on your own computer, start a temporary Postgres
+# container yourself (see the README) and point the DB_* settings at it.
+import os
+import uuid
+
+import psycopg
+import pytest
+from fastapi.testclient import TestClient
+
+from app.db import connect
+from app.main import app
+
+client = TestClient(app)
+
+
+# In plain English: runs before every test in this file. With no database
+# settings at all, the tests quietly skip, so a normal run on your laptop still
+# works. In the pipeline REQUIRE_DB=1 is set, and then a missing database is a
+# failure, because a test that silently skips proves nothing. If the settings
+# point at any database other than "knowledge_test", it refuses to run.
+@pytest.fixture(autouse=True)
+def require_test_database():
+    if not os.environ.get("DB_HOST"):
+        if os.environ.get("REQUIRE_DB") == "1":
+            pytest.fail("REQUIRE_DB is set but no database settings were given")
+        pytest.skip("no test database configured")
+    if os.environ.get("DB_NAME") != "knowledge_test":
+        pytest.fail("refusing to run: DB_NAME must be 'knowledge_test', never a real database")
+
+
+# In plain English: saves one example through the real web address and returns
+# its ID. It also checks the save worked.
+def save(assignment_id, student_work, grade="A", reasoning="Correct."):
+    response = client.post(
+        "/examples",
+        json={
+            "assignment_id": assignment_id,
+            "student_work": student_work,
+            "grade": grade,
+            "reasoning": reasoning,
+        },
+    )
+    assert response.status_code == 201
+    return response.json()["example_id"]
+
+
+# In plain English: a brand new assignment ID, so one test's rows never mix
+# with another test's.
+def new_assignment():
+    return str(uuid.uuid4())
+
+
+# In plain English: with the right password the service says it is ready.
+def test_ready_with_a_working_login():
+    response = client.get("/ready")
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+
+
+# In plain English: the ready check must be able to fail. With a wrong password
+# it must answer 503 and say nothing about why. The test first proves the right
+# password works, so a 503 can only be caused by the wrong password and not by a
+# database that was never reachable at all.
+def test_ready_fails_quietly_with_a_wrong_password(monkeypatch):
+    assert client.get("/ready").status_code == 200
+    monkeypatch.setenv("DB_PASSWORD", "not-the-password")
+    response = client.get("/ready")
+    assert response.status_code == 503
+    assert response.json() == {"ok": False}
+
+
+# In plain English: a saved example is really in the database, with its 384
+# meaning numbers.
+def test_save_stores_a_384_number_embedding():
+    example_id = save(new_assignment(), "The mitochondria makes energy for the cell.")
+    with connect() as connection:
+        row = connection.execute(
+            "SELECT vector_dims(embedding) FROM examples WHERE example_id = %s",
+            (uuid.UUID(example_id),),
+        ).fetchone()
+    assert row[0] == 384
+
+
+# In plain English: listing returns what was saved, leaves out the numbers, and
+# returns nothing for a different assignment.
+def test_list_returns_saved_examples_only_for_that_assignment():
+    assignment = new_assignment()
+    example_id = save(assignment, "Plants make food from sunlight.", "B")
+    listed = client.get("/examples", params={"assignment_id": assignment}).json()
+    assert [item["example_id"] for item in listed] == [example_id]
+    assert "embedding" not in listed[0]
+    other = client.get("/examples", params={"assignment_id": new_assignment()}).json()
+    assert other == []
+
+
+# In plain English: the point of the whole service. A question about cells and
+# energy must find the mitochondria example before the sunlight one.
+def test_search_ranks_the_closest_meaning_first():
+    assignment = new_assignment()
+    mitochondria = save(assignment, "The mitochondria makes energy for the cell.", "A")
+    sunlight = save(assignment, "Plants make food from sunlight.", "B")
+    results = client.post(
+        "/examples/search",
+        json={"assignment_id": assignment, "query_text": "cells produce energy"},
+    ).json()
+    assert [item["example_id"] for item in results] == [mitochondria, sunlight]
+    assert results[0]["similarity"] > results[1]["similarity"]
+
+
+# In plain English: search must stay inside one assignment. Two assignments hold
+# near identical text, and a search in one must never return the other's example.
+def test_search_never_returns_another_assignments_examples():
+    first = new_assignment()
+    second = new_assignment()
+    mine = save(first, "The mitochondria makes energy for the cell.")
+    theirs = save(second, "The mitochondria makes energy for the cell.")
+    results = client.post(
+        "/examples/search",
+        json={"assignment_id": first, "query_text": "cells produce energy"},
+    ).json()
+    assert [item["example_id"] for item in results] == [mine]
+    assert theirs not in [item["example_id"] for item in results]
+
+
+# In plain English: the service's login can read and add but can never change or
+# remove an example. First it proves the test really is running as that limited
+# login and that reading works, so the refusals below mean "not allowed" and not
+# "login missing". Then it tries to change and to delete, and both must be
+# refused, and the example must still be intact.
+def test_service_login_cannot_update_or_delete():
+    assignment = new_assignment()
+    save(assignment, "The mitochondria makes energy for the cell.", "A")
+    assignment_uuid = uuid.UUID(assignment)
+
+    with connect() as connection:
+        who = connection.execute("SELECT current_user").fetchone()[0]
+        count = connection.execute(
+            "SELECT count(*) FROM examples WHERE assignment_id = %s", (assignment_uuid,)
+        ).fetchone()[0]
+    assert who == "knowledge_app"
+    assert count == 1
+
+    for statement in (
+        "DELETE FROM examples WHERE assignment_id = %s",
+        "UPDATE examples SET grade = 'F' WHERE assignment_id = %s",
+    ):
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            with connect() as connection:
+                connection.execute(statement, (assignment_uuid,))
+
+    listed = client.get("/examples", params={"assignment_id": assignment}).json()
+    assert len(listed) == 1
+    assert listed[0]["grade"] == "A"
