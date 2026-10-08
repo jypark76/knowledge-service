@@ -22,6 +22,17 @@ class NewExample(BaseModel):
     reasoning: str = Field(min_length=1, max_length=5000)
 
 
+# In plain English: the rules for a "find similar examples" request. We need the
+# assignment to look inside, the text to compare, and optionally how many
+# matches to return (1 to 10, default 3). Extra fields are rejected.
+class SearchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    assignment_id: UUID
+    query_text: str = Field(min_length=1, max_length=20000)
+    limit: int = Field(default=3, ge=1, le=10)
+
+
 # In plain English: turns the 384 numbers into the text form the database
 # understands, like "[0.1,0.2,...]". The database then reads it as a vector.
 def _vector_text(numbers):
@@ -70,6 +81,34 @@ def list_examples(assignment_id):
             "grade": row[3],
             "reasoning": row[4],
             "created_at": row[5].isoformat(),
+        }
+        for row in rows
+    ]
+
+
+# In plain English: finds the saved examples whose MEANING is closest to the
+# given text, but only inside the one assignment asked about. It turns the text
+# into 384 numbers, then lets the database rank saved examples by how close
+# their numbers are ("cosine distance", using the fast index). Each result gets
+# a similarity score: 1 means practically identical, lower means less alike.
+# This only reads; it changes nothing.
+def search_examples(request):
+    embedding = _vector_text(embed_text(request.query_text))
+    with connect() as connection:
+        rows = connection.execute(
+            "SELECT example_id, student_work, grade, reasoning, "
+            "1 - (embedding <=> %s::vector) AS similarity "
+            "FROM examples WHERE assignment_id = %s "
+            "ORDER BY embedding <=> %s::vector LIMIT %s",
+            (embedding, request.assignment_id, embedding, request.limit),
+        ).fetchall()
+    return [
+        {
+            "example_id": str(row[0]),
+            "student_work": row[1],
+            "grade": row[2],
+            "reasoning": row[3],
+            "similarity": round(float(row[4]), 4),
         }
         for row in rows
     ]

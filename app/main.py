@@ -1,6 +1,6 @@
 # In plain English: this is the front door of the knowledge service. It answers
 # "are you alive?" and "are you ready to work?", and it lets callers save a
-# graded example and list the saved ones. Finding similar examples comes next.
+# graded example, list the saved ones and find the most similar ones.
 from uuid import UUID
 
 import psycopg
@@ -9,11 +9,17 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.db import database_is_ready
-from app.examples import NewExample, list_examples, save_example
+from app.examples import (
+    NewExample,
+    SearchRequest,
+    list_examples,
+    save_example,
+    search_examples,
+)
 
 # Create the web application. The title and version show up on the automatic
 # documentation page FastAPI builds at /docs.
-app = FastAPI(title="Knowledge service", version="0.3.1")
+app = FastAPI(title="Knowledge service", version="0.4.0")
 
 
 # In plain English: when a request is turned away for bad input, FastAPI would
@@ -67,5 +73,18 @@ def create_example(example: NewExample):
 def get_examples(assignment_id: UUID):
     try:
         return list_examples(assignment_id)
+    except psycopg.Error:
+        return JSONResponse(status_code=503, content={"ok": False})
+
+
+# In plain English: finds the saved examples closest in meaning to some text,
+# inside one assignment. Bad input is turned away by FastAPI (422) before our
+# code runs; a database problem gives a plain 503 with no details. This is a
+# POST only because the text to compare can be long, not because it saves
+# anything.
+@app.post("/examples/search")
+def search(request: SearchRequest):
+    try:
+        return search_examples(request)
     except psycopg.Error:
         return JSONResponse(status_code=503, content={"ok": False})
