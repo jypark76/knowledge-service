@@ -30,7 +30,7 @@ class SearchRequest(BaseModel):
 
     assignment_id: UUID
     query_text: str = Field(min_length=1, max_length=20000)
-    limit: int = Field(default=3, ge=1, le=10)
+    limit: int = Field(default=3, ge=1, le=100)
 
 
 # In plain English: turns the 384 numbers into the text form the database
