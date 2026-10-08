@@ -59,3 +59,4 @@ $$;
 -- through the service, even if the service has a bug.
 GRANT USAGE ON SCHEMA public TO knowledge_app;
 GRANT SELECT, INSERT ON examples TO knowledge_app;
+GRANT DELETE ON examples TO knowledge_app;
