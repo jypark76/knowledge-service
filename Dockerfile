@@ -28,7 +28,6 @@ RUN useradd --create-home appuser
 ENV FASTEMBED_CACHE_PATH=/app/model_cache
 RUN mkdir /app/model_cache && chown appuser /app/model_cache
 USER appuser
-RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')"
 
 # Copy in the service code.
 COPY --chown=appuser app/ ./app/
