@@ -50,6 +50,10 @@ python -m venv .venv
 The same tests run on every pull request, and the `main` branch rules require
 them to pass before a merge.
 
+The pipeline also builds the Docker image and starts it with the network off, then checks
+`/health`, that `/ready` fails safely with no database, that the model is inside the image,
+that it runs as user 1000 and that only the code, the model and the list of libraries are in `/app`.
+
 `tests/test_k8s_manifests.py` builds the Kubernetes files for the laptop settings and
 checks them against our rules (namespace, no Secret, fixed image tags, a locked-down
 service pod and more). It needs `kubectl` and is skipped without it. Its self-tests

@@ -149,3 +149,97 @@ jobs:
         env:
           REQUIRE_KUBECTL: "1"
         run: pytest -v tests/test_k8s_manifests.py
+
+  # In plain English: the fourth job. It builds the real Docker image, the same one
+  # the cluster runs, and starts it with the network switched off and no database.
+  # Then it checks the things the other jobs take on trust: the service answers
+  # /health, /ready fails safely, the AI model is really inside the image (it cannot
+  # download anything with the network off), the service runs as user 1000 and not
+  # as root, and nothing that should stay out of the image got in.
+  image-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -t knowledge-service:ci .
+
+      # --network none means the container cannot reach the internet. If the model
+      # was not saved into the image during the build, the model check below fails.
+      - name: Start it with the network off
+        run: docker run -d --name image-test --network none knowledge-service:ci
+
+      - name: Wait for the service to answer
+        run: |
+          for attempt in $(seq 1 30); do
+            if docker exec image-test python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "The service did not start in time." >&2
+          docker logs image-test >&2
+          exit 1
+
+      - name: Check /health
+        run: |
+          reply="$(docker exec image-test python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/health').read().decode())")"
+          if [ "$reply" != '{"ok":true}' ]; then
+            echo "Unexpected /health reply: $reply" >&2
+            exit 1
+          fi
+
+      # With no database settings the ready check must answer 503 and say nothing
+      # about why.
+      - name: Check /ready fails safely with no database
+        run: |
+          docker exec -i image-test python - <<'PY'
+          import json
+          import urllib.error
+          import urllib.request
+
+          try:
+              urllib.request.urlopen("http://127.0.0.1:8000/ready", timeout=5)
+          except urllib.error.HTTPError as error:
+              assert error.code == 503, error.code
+              assert json.loads(error.read()) == {"ok": False}
+          else:
+              raise SystemExit("expected a 503 from /ready")
+          PY
+
+      - name: Check the model is inside the image
+        run: |
+          docker exec image-test python -c "from app.embeddings import embed_text; numbers = embed_text('hello world'); assert len(numbers) == 384, len(numbers)"
+
+      - name: Check it runs as user 1000
+        run: |
+          user_id="$(docker exec image-test id -u)"
+          if [ "$user_id" != "1000" ]; then
+            echo "The service runs as user $user_id, expected 1000" >&2
+            exit 1
+          fi
+
+      # Only the code, the model and the list of libraries (the Dockerfile copies it in
+      # to install them) should be in /app. The tests, the Kubernetes files and any
+      # notes must stay out, and so must anything that looks like a secret.
+      - name: Check only the expected files are inside
+        run: |
+          contents="$(docker exec image-test ls -A /app | sort | tr '\n' ' ')"
+          if [ "$contents" != "app model_cache requirements.txt " ]; then
+            echo "Unexpected files in /app: $contents" >&2
+            exit 1
+          fi
+          suspicious="$(docker exec image-test find /app \( -name '.env*' -o -name '*.pem' -o -name '*.key' -o -iname '*secret*' \))"
+          if [ -n "$suspicious" ]; then
+            echo "Files that look like secrets are inside the image:" >&2
+            echo "$suspicious" >&2
+            exit 1
+          fi
+
+      - name: Show the service log
+        if: failure()
+        run: docker logs image-test
+
+      - name: Clean up
+        if: always()
+        run: docker rm -f image-test
