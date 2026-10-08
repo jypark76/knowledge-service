@@ -113,6 +113,15 @@ through there. It has to be tested on a cluster that enforces policies.
 
 On AWS the database is RDS, so the Postgres pod is not used there.
 
+## Known limits
+
+- Search uses pgvector's HNSW index with iterative scan switched on, which stops
+  after 20000 scanned rows (`hnsw.max_scan_tuples`). A small assignment hidden
+  behind tens of thousands of closer examples from other assignments could still
+  return too few results. Nothing near that size exists today.
+- The NetworkPolicy is written but not verified, because Docker Desktop's
+  built-in cluster does not enforce it.
+
 ## Security notes
 
 - This repo is public. It never contains passwords, API keys or Kubernetes

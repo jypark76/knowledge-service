@@ -4,10 +4,26 @@
 # the database: one that saves an example and one that lists them.
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.db import connect
 from app.embeddings import embed_text
+
+
+# In plain English: refuses text that Postgres cannot store. A null character
+# (the invisible character with code zero) would make the database driver fail,
+# and that used to come back as a 503 "try again later" that a client retries
+# forever. Rejecting it here turns it into a proper 422 "bad input". Text that
+# cannot be written out as UTF-8 is refused for the same reason. The messages are
+# fixed wording and never quote the text.
+def _must_be_storable_text(value):
+    if "\x00" in value:
+        raise ValueError("Text must not contain null characters")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError("Text must be valid Unicode")
+    return value
 
 
 # In plain English: the rules for a request to save a new example. Every field
@@ -21,6 +37,9 @@ class NewExample(BaseModel):
     grade: str = Field(min_length=1, max_length=100)
     reasoning: str = Field(min_length=1, max_length=5000)
 
+    # Apply the storable-text check to all three text fields.
+    _check_text = field_validator("student_work", "grade", "reasoning")(_must_be_storable_text)
+
 
 # In plain English: the rules for a "find similar examples" request. We need the
 # assignment to look inside, the text to compare, and optionally how many
@@ -31,6 +50,9 @@ class SearchRequest(BaseModel):
     assignment_id: UUID
     query_text: str = Field(min_length=1, max_length=20000)
     limit: int = Field(default=3, ge=1, le=10)
+
+    # The text to compare gets the same storable-text check.
+    _check_text = field_validator("query_text")(_must_be_storable_text)
 
 
 # In plain English: turns the 384 numbers into the text form the database
@@ -89,12 +111,24 @@ def list_examples(assignment_id):
 # In plain English: finds the saved examples whose MEANING is closest to the
 # given text, but only inside the one assignment asked about. It turns the text
 # into 384 numbers, then lets the database rank saved examples by how close
-# their numbers are ("cosine distance", using the fast index). Each result gets
+# their numbers ("cosine distance", using the fast index). Each result gets
 # a similarity score: 1 means practically identical, lower means less alike.
 # This only reads; it changes nothing.
+#
+# The fast index only looks at about 40 candidates from ALL assignments and
+# filters afterwards, so a small assignment surrounded by closer rows from other
+# assignments could come back with too few results. The first statement switches
+# on pgvector's "keep looking until enough rows pass the filter" mode
+# (iterative scan) for this one transaction. That fixes the common case. It still
+# stops after pgvector's scan limit (hnsw.max_scan_tuples, 20000 rows by
+# default), so a small assignment hidden behind tens of thousands of closer rows
+# from other assignments could still come back short. If that ever matters:
+# raise the limit, rank inside one assignment exactly (filter first, then sort),
+# or split the table by assignment.
 def search_examples(request):
     embedding = _vector_text(embed_text(request.query_text))
     with connect() as connection:
+        connection.execute("SET LOCAL hnsw.iterative_scan = strict_order")
         rows = connection.execute(
             "SELECT example_id, student_work, grade, reasoning, "
             "1 - (embedding <=> %s::vector) AS similarity "
