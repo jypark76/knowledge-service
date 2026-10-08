@@ -78,6 +78,11 @@ The embedding model loads on the first save or search call, not at startup, so
 the first call is slower. If it is ever preloaded at startup, add a
 `startupProbe` to the Deployment so a slow start is not mistaken for a crash.
 
+The database pod has a NetworkPolicy (`k8s/overlays/local/networkpolicy.yaml`) that
+allows only the service pod to connect. It is written but not verified: Docker
+Desktop's built-in cluster does not enforce NetworkPolicy, so a wrong pod still gets
+through there. It has to be tested on a cluster that enforces policies.
+
 On AWS the database is RDS, so the Postgres pod is not used there.
 
 ## Security notes
