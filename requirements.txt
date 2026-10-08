@@ -7,3 +7,7 @@ fastapi==0.142.4
 
 # The small web server that actually runs the FastAPI app.
 uvicorn==0.54.0
+
+# The driver that lets Python talk to the Postgres database. The "binary" part
+# means it comes ready-made, so the box needs no extra build tools.
+psycopg[binary]==3.3.6
