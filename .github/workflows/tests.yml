@@ -1,0 +1,40 @@
+# In plain English: this tells GitHub to run the automated tests every time
+# someone opens or updates a pull request, and every time something lands on
+# main. If any test fails, the check turns red. Once the branch rules on GitHub
+# require this check ("tests"), a red check blocks the merge.
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# The workflow only needs to read the code, nothing more.
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    env:
+      # Where the AI model files are saved, so they can be reused between runs.
+      FASTEMBED_CACHE_PATH: ${{ github.workspace }}/.model_cache
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same Python version as the Dockerfile, so tests match the real service.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      # Remember the downloaded AI model so most runs skip the 130 MB download.
+      - uses: actions/cache@v4
+        with:
+          path: .model_cache
+          key: fastembed-bge-small-en-v1.5
+
+      - run: pip install -r requirements-dev.txt
+
+      - run: pytest -v
