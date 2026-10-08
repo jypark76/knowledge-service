@@ -64,6 +64,20 @@ bash k8s/deploy.sh --preview   # show what would be deployed
 bash k8s/deploy.sh             # deploy
 ```
 
+First time on a cluster: create the Secret by hand (the script prints the
+command), then run `deploy.sh`. On its first start the database sets itself up
+from `db/init.sql` and gives the `knowledge_app` login its password from the
+Secret. To start the database from scratch:
+
+```
+kubectl delete -n knowledge deployment/knowledge-db pvc/knowledge-db-data
+bash k8s/deploy.sh
+```
+
+The embedding model loads on the first save or search call, not at startup, so
+the first call is slower. If it is ever preloaded at startup, add a
+`startupProbe` to the Deployment so a slow start is not mistaken for a crash.
+
 On AWS the database is RDS, so the Postgres pod is not used there.
 
 ## Security notes

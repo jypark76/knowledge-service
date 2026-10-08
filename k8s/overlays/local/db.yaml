@@ -7,6 +7,11 @@
 # passwords: "postgres-password" (the database administrator) and
 # "app-password" (the limited login the service uses). You create that Secret
 # by typing a command yourself. It is never stored in this repo.
+#
+# The database sets itself up on its FIRST start (empty disk): it runs the
+# table setup (db/init.sql, put into a ConfigMap called knowledge-db-init by
+# deploy.sh) and then set-app-password.sh. Postgres skips both on later starts.
+# To start from scratch, delete the Deployment and the disk, then deploy again.
 
 # Part 1: a reserved piece of disk, so the data survives if the pod restarts.
 apiVersion: v1
@@ -69,6 +74,10 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+            # The "first start" scripts Postgres runs on an empty disk.
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
           # Kubernetes only counts the database as "ready" once it answers.
           readinessProbe:
             exec:
@@ -85,6 +94,16 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: knowledge-db-data
+        # Both ConfigMaps are shown as one folder of scripts. 0755 lets
+        # Postgres run the .sh one.
+        - name: initdb
+          projected:
+            defaultMode: 0755
+            sources:
+              - configMap:
+                  name: knowledge-db-init
+              - configMap:
+                  name: knowledge-db-init-password
 ---
 # Part 3: a fixed internal address, "knowledge-db", so the app can find the
 # database by name. It has no outside port: only things inside the cluster can

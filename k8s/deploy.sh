@@ -8,7 +8,8 @@
 # That last rule is the safety net: laptop settings can never be applied to a
 # real cluster by accident, or the other way round.
 #
-# It never creates or reads passwords. The Secret must already exist; if it
+# It never creates or reads passwords. (On the laptop it also hands the table
+# setup file db/init.sql to the database pod, which contains no secrets.) The Secret must already exist; if it
 # does not, the script tells you the command to type and stops.
 #
 # Usage:  bash k8s/deploy.sh            (deploy)
@@ -61,10 +62,22 @@ fi
 kubectl apply -f "$here/base/namespace.yaml"
 
 # The passwords must already be in the cluster. We never create them here.
-if ! kubectl get secret knowledge-db -n knowledge >/dev/null 2>&1; then
+# "--ignore-not-found" means a missing Secret gives an empty answer, while any
+# other problem (no connection, expired login, no permission) shows its real
+# error and stops the script.
+secret="$(kubectl get secret knowledge-db -n knowledge --ignore-not-found -o name)"
+if [ -z "$secret" ]; then
   echo "The Secret 'knowledge-db' does not exist yet. Create it first, with your own passwords:" >&2
   echo "  kubectl create secret generic knowledge-db -n knowledge --from-literal=postgres-password=ADMIN_PASSWORD --from-literal=app-password=APP_PASSWORD" >&2
   exit 1
+fi
+
+# Laptop only: hand the table-setup file (db/init.sql) to the database pod. It
+# contains no secrets. The pod runs it by itself on its first start.
+if [ "$overlay" = "local" ]; then
+  kubectl create configmap knowledge-db-init -n knowledge \
+    --from-file=01-init.sql="$here/../db/init.sql" \
+    --dry-run=client -o yaml | kubectl apply -f -
 fi
 
 # Deploy everything for this environment.
