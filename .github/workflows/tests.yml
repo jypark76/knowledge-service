@@ -38,3 +38,87 @@ jobs:
       - run: pip install -r requirements-dev.txt
 
       - run: pytest -v
+
+  # In plain English: the second job. It starts a real, throwaway Postgres in a
+  # container, builds it the same way the cluster does (the same db/init.sql and
+  # the same password script), then runs the database tests against it. The
+  # passwords are random, made fresh for each run, hidden from the logs and never
+  # stored anywhere. When the job ends, the database and its data are destroyed.
+  database-tests:
+    runs-on: ubuntu-latest
+    env:
+      FASTEMBED_CACHE_PATH: ${{ github.workspace }}/.model_cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - uses: actions/cache@v4
+        with:
+          path: .model_cache
+          key: fastembed-bge-small-en-v1.5
+
+      # Make two random passwords for this run only, hide them from the logs, and
+      # hand them to the later steps.
+      - name: Make throwaway passwords
+        run: |
+          admin_password="$(openssl rand -hex 16)"
+          app_password="$(openssl rand -hex 16)"
+          echo "::add-mask::$admin_password"
+          echo "::add-mask::$app_password"
+          echo "ADMIN_PASSWORD=$admin_password" >> "$GITHUB_ENV"
+          echo "APP_PASSWORD=$app_password" >> "$GITHUB_ENV"
+
+      # Start Postgres the way the cluster does: the two first-start scripts are
+      # put in the folder Postgres reads when it creates a new database. The
+      # database is named knowledge_test, which is the only name the tests accept.
+      - name: Start the test database
+        run: |
+          chmod +x k8s/overlays/local/set-app-password.sh
+          docker run -d --name test-db \
+            -e POSTGRES_PASSWORD="$ADMIN_PASSWORD" \
+            -e POSTGRES_DB=knowledge_test \
+            -e APP_PASSWORD="$APP_PASSWORD" \
+            -v "$PWD/db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro" \
+            -v "$PWD/k8s/overlays/local/set-app-password.sh:/docker-entrypoint-initdb.d/02-set-app-password.sh:ro" \
+            -p 5432:5432 \
+            pgvector/pgvector:0.8.7-pg17
+
+      # Wait until the first-start scripts have finished AND the real server is
+      # answering over the network. (A check over the local socket can say "ready"
+      # too early, while the temporary setup server is still running.)
+      - name: Wait for the database
+        run: |
+          for attempt in $(seq 1 60); do
+            if docker logs test-db 2>&1 | grep -q "init process complete" \
+              && docker exec test-db pg_isready -h 127.0.0.1 -U postgres -d knowledge_test; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "The test database did not become ready in time." >&2
+          docker logs test-db >&2
+          exit 1
+
+      - run: pip install -r requirements-dev.txt
+
+      # REQUIRE_DB=1 turns "skipped" into "failed", so these tests cannot pass by
+      # silently doing nothing.
+      - name: Run the database tests
+        env:
+          DB_HOST: localhost
+          DB_PORT: "5432"
+          DB_NAME: knowledge_test
+          DB_USER: knowledge_app
+          DB_PASSWORD: ${{ env.APP_PASSWORD }}
+          REQUIRE_DB: "1"
+        run: pytest -v tests/test_database.py
+
+      # If anything failed, show the database's own log to help find out why.
+      - name: Show the database log
+        if: failure()
+        run: docker logs test-db
