@@ -19,7 +19,44 @@ from app.examples import (
 
 # Create the web application. The title and version show up on the automatic
 # documentation page FastAPI builds at /docs.
-app = FastAPI(title="Knowledge service", version="0.4.0")
+app = FastAPI(title="Knowledge service", version="0.4.1")
+
+
+# In plain English: the kinds of error whose built-in wording is safe, because it
+# only describes the rule and never quotes what the caller sent. "value_error" is
+# our own check for unstorable text, with fixed wording of our own.
+SAFE_ERROR_KINDS = {
+    "missing",
+    "extra_forbidden",
+    "string_too_short",
+    "string_too_long",
+    "greater_than_equal",
+    "less_than_equal",
+    "int_parsing",
+    "int_type",
+    "string_type",
+    "value_error",
+}
+
+# In plain English: the built-in wording for a bad UUID quotes the offending
+# character, so these kinds get fixed wording instead.
+FIXED_REASONS = {
+    "uuid_parsing": "Input should be a valid UUID",
+    "uuid_type": "Input should be a valid UUID",
+    "uuid_version": "Input should be a valid UUID",
+}
+
+
+# In plain English: picks the reason to show for one problem. Fixed wording for the
+# kinds that could quote the caller, the built-in wording for the kinds known to be
+# safe, and a plain "Invalid value" for anything we have not checked one by one.
+def safe_reason(item):
+    kind = item["type"]
+    if kind in FIXED_REASONS:
+        return FIXED_REASONS[kind]
+    if kind in SAFE_ERROR_KINDS:
+        return item["msg"]
+    return "Invalid value"
 
 
 # In plain English: when a request is turned away for bad input, FastAPI would
@@ -30,7 +67,7 @@ app = FastAPI(title="Knowledge service", version="0.4.0")
 @app.exception_handler(RequestValidationError)
 def bad_input(request: Request, error: RequestValidationError):
     problems = [
-        {"field": ".".join(str(part) for part in item["loc"]), "reason": item["msg"]}
+        {"field": ".".join(str(part) for part in item["loc"]), "reason": safe_reason(item)}
         for item in error.errors()
     ]
     return JSONResponse(status_code=422, content={"problems": problems})

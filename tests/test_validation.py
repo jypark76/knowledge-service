@@ -120,3 +120,50 @@ def test_refusal_does_not_echo_input():
     response = client.post("/examples", json=data)
     assert response.status_code == 422
     assert "SECRET-MARKER-12345" not in response.text
+
+
+# In plain English: a null character (the invisible character with code zero)
+# cannot be stored by Postgres. It must be turned away at the door as bad input
+# (422), and never reach the database and come back as a 503 "try again later",
+# which a client would retry forever.
+def test_save_rejects_null_characters_in_every_text_field():
+    for field in ("student_work", "grade", "reasoning"):
+        data = good_example()
+        data[field] = "abc\u0000def"
+        response = client.post("/examples", json=data)
+        assert_refused(response, field)
+        assert "abc" not in response.text
+
+
+def test_search_rejects_null_characters_in_the_query():
+    data = good_search()
+    data["query_text"] = "abc\u0000def"
+    response = client.post("/examples/search", json=data)
+    assert_refused(response, "query_text")
+    assert "abc" not in response.text
+
+
+# In plain English: the reason for a bad UUID must be fixed wording. The built-in
+# wording quotes the offending character, and the README promises the reply never
+# repeats what the caller sent.
+def test_bad_uuid_reason_is_fixed_wording_everywhere():
+    data = good_example()
+    data["assignment_id"] = "SECRET-MARKER-12345"
+    saved = client.post("/examples", json=data).json()
+    assert saved == {"problems": [{"field": "body.assignment_id", "reason": "Input should be a valid UUID"}]}
+    listed = client.get("/examples", params={"assignment_id": "SECRET-MARKER-12345"}).json()
+    assert listed == {"problems": [{"field": "query.assignment_id", "reason": "Input should be a valid UUID"}]}
+
+
+# In plain English: for any kind of error we have not looked at one by one, the
+# reply says only "Invalid value". Here a broken JSON body is cut off in the
+# middle of a text, and none of that text may come back.
+def test_unknown_kinds_of_error_get_generic_wording():
+    response = client.post(
+        "/examples",
+        content='{"student_work": "SECRET-MARKER',
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 422
+    assert "SECRET-MARKER" not in response.text
+    assert [problem["reason"] for problem in response.json()["problems"]] == ["Invalid value"]

@@ -11,6 +11,7 @@
 # away afterwards. To run these on your own computer, start a temporary Postgres
 # container yourself (see the README) and point the DB_* settings at it.
 import os
+import random
 import uuid
 
 import psycopg
@@ -18,6 +19,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.db import connect
+from app.embeddings import embed_text
+from app.examples import _vector_text
 from app.main import app
 
 client = TestClient(app)
@@ -161,3 +164,58 @@ def test_service_login_cannot_update_or_delete():
     listed = client.get("/examples", params={"assignment_id": assignment}).json()
     assert len(listed) == 1
     assert listed[0]["grade"] == "A"
+
+
+# In plain English: why search needs pgvector's "keep looking" mode. The search
+# index (HNSW) only looks at about 40 candidates across ALL assignments and filters
+# afterwards. So a small assignment surrounded by many closer rows from another
+# assignment comes back empty. This test builds exactly that situation: 60 close
+# rows in one assignment and one far row in another. The ordinary assignment index
+# would normally rescue the query, so the filter is written in a way that index
+# cannot be used, which leaves the HNSW index as the only fast path. It checks the
+# plan really uses the HNSW index, shows that WITHOUT iterative scan the small
+# assignment is lost, and that WITH it the row is found.
+def test_filtered_index_search_needs_iterative_scan_to_find_a_small_assignment():
+    crowded = new_assignment()
+    small = new_assignment()
+    close_vector = _vector_text(embed_text("cells produce energy"))
+    far_vector = _vector_text(embed_text("Plants make food from sunlight."))
+    insert = (
+        "INSERT INTO examples (assignment_id, student_work, grade, reasoning, embedding) "
+        "VALUES (%s, %s, 'A', 'r', %s::vector)"
+    )
+    # 60 close rows, each nudged by a tiny different amount. Identical copies make
+    # the index build a strange graph, so every row gets its own small difference.
+    close_numbers = embed_text("cells produce energy")
+    noise = random.Random(1234)
+    with connect() as connection:
+        for _ in range(60):
+            nudged = [number + noise.uniform(-0.01, 0.01) for number in close_numbers]
+            connection.execute(insert, (uuid.UUID(crowded), "close", _vector_text(nudged)))
+        connection.execute(insert, (uuid.UUID(small), "far", far_vector))
+
+    query = (
+        "SELECT example_id FROM examples "
+        f"WHERE assignment_id::text = '{small}' "
+        f"ORDER BY embedding <=> '{close_vector}'::vector LIMIT 3"
+    )
+
+    def run(iterative):
+        with connect() as connection:
+            connection.execute("SET LOCAL enable_seqscan = off")
+            # Look at only 10 candidates instead of the usual 40, so the effect
+            # shows up reliably with just 60 close rows.
+            connection.execute("SET LOCAL hnsw.ef_search = 10")
+            if iterative:
+                connection.execute("SET LOCAL hnsw.iterative_scan = strict_order")
+            plan = "\n".join(row[0] for row in connection.execute("EXPLAIN " + query).fetchall())
+            rows = connection.execute(query).fetchall()
+        return plan, rows
+
+    plan, rows = run(iterative=False)
+    assert "examples_embedding_idx" in plan
+    assert rows == []
+
+    plan, rows = run(iterative=True)
+    assert "examples_embedding_idx" in plan
+    assert len(rows) == 1
