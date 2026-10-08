@@ -117,6 +117,11 @@ through there. It has to be tested on a cluster that enforces policies.
 
 On AWS the database is RDS, so the Postgres pod is not used there.
 
+## Starting a new service from this repo
+
+This repo is the template for the other microservices. See [`NEW_SERVICE.md`](NEW_SERVICE.md)
+for the rename command, what to rewrite, the one-time GitHub setup and the order of work.
+
 ## Known limits
 
 - Search uses pgvector's HNSW index with iterative scan switched on, which stops
