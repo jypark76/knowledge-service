@@ -1,0 +1,10 @@
+# In plain English: extra libraries needed only for running the automated
+# tests. They are kept out of requirements.txt on purpose, so the Docker image
+# that runs the service never carries test tools.
+-r requirements.txt
+
+# The test runner.
+pytest==9.1.1
+
+# Lets the tests call the service's web addresses without starting a server.
+httpx==0.28.1
