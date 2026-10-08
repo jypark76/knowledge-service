@@ -12,3 +12,11 @@ __pycache__
 docs-private
 db
 *.md
+# Not needed inside the image: tests, cluster files and pipeline settings.
+k8s
+tests
+.github
+pytest.ini
+requirements-dev.txt
+.pytest_cache
+.model_cache
