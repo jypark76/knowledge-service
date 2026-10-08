@@ -1,0 +1,14 @@
+# In plain English: files Docker should leave out of the box it builds, so the
+# image stays small and no secrets or private notes are packed inside.
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+.env
+*.env
+*.pem
+*.key
+docs-private
+db
+*.md

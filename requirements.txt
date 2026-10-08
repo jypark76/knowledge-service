@@ -1,0 +1,9 @@
+# In plain English: the list of outside Python libraries this service needs.
+# Versions are pinned to exact numbers on purpose, so a surprise new release
+# can never change the service without us choosing to update it.
+
+# The web framework that receives requests and checks incoming data.
+fastapi==0.142.4
+
+# The small web server that actually runs the FastAPI app.
+uvicorn==0.54.0
