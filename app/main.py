@@ -59,6 +59,17 @@ def safe_reason(item):
     return "Invalid value"
 
 
+# In plain English: picks the field name to show for one problem. Normally that
+# is the path to the field, like "body.student_work". For an unexpected extra
+# field the last part of the path is the name the CALLER chose, which is caller
+# data too, so it is left off and the reply names only the place ("body").
+def safe_field(item):
+    parts = item["loc"]
+    if item["type"] == "extra_forbidden":
+        parts = parts[:-1]
+    return ".".join(str(part) for part in parts)
+
+
 # In plain English: when a request is turned away for bad input, FastAPI would
 # normally repeat the bad value back to the caller. We don't want pieces of
 # someone's data bouncing around in error messages (or ending up in logs). So
@@ -67,7 +78,7 @@ def safe_reason(item):
 @app.exception_handler(RequestValidationError)
 def bad_input(request: Request, error: RequestValidationError):
     problems = [
-        {"field": ".".join(str(part) for part in item["loc"]), "reason": safe_reason(item)}
+        {"field": safe_field(item), "reason": safe_reason(item)}
         for item in error.errors()
     ]
     return JSONResponse(status_code=422, content={"problems": problems})

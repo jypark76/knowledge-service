@@ -39,6 +39,15 @@ def assert_refused(response, field):
         assert set(problem.keys()) == {"field", "reason"}
 
 
+# In plain English: an unexpected extra field must be refused, and the reply must
+# name only the place ("body"), never the name the caller chose for the field.
+def assert_extra_field_refused(response):
+    assert response.status_code == 422
+    assert response.json() == {
+        "problems": [{"field": "body", "reason": "Extra inputs are not permitted"}]
+    }
+
+
 def test_save_rejects_bad_uuid():
     data = good_example()
     data["assignment_id"] = "not-a-uuid"
@@ -66,7 +75,7 @@ def test_save_rejects_oversize_grade():
 def test_save_rejects_extra_field():
     data = good_example()
     data["extra"] = "sneaky"
-    assert_refused(client.post("/examples", json=data), "extra")
+    assert_extra_field_refused(client.post("/examples", json=data))
 
 
 def test_save_rejects_missing_field():
@@ -102,7 +111,7 @@ def test_search_rejects_limit_zero():
 def test_search_rejects_extra_field():
     data = good_search()
     data["extra"] = "sneaky"
-    assert_refused(client.post("/examples/search", json=data), "extra")
+    assert_extra_field_refused(client.post("/examples/search", json=data))
 
 
 # In plain English: the list address needs a real UUID too.
@@ -167,3 +176,19 @@ def test_unknown_kinds_of_error_get_generic_wording():
     assert response.status_code == 422
     assert "SECRET-MARKER" not in response.text
     assert [problem["reason"] for problem in response.json()["problems"]] == ["Invalid value"]
+
+
+# In plain English: a caller can pick any name for an extra field, so the name is
+# caller data too. Using a secret-looking name shows whether it comes back.
+def test_extra_field_names_are_never_echoed():
+    save_data = good_example()
+    save_data["SECRET-MARKER-12345"] = "x"
+    save_response = client.post("/examples", json=save_data)
+    assert_extra_field_refused(save_response)
+    assert "SECRET-MARKER-12345" not in save_response.text
+
+    search_data = good_search()
+    search_data["SECRET-MARKER-12345"] = "x"
+    search_response = client.post("/examples/search", json=search_data)
+    assert_extra_field_refused(search_response)
+    assert "SECRET-MARKER-12345" not in search_response.text

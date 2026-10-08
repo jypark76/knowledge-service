@@ -119,7 +119,12 @@ def list_examples(assignment_id):
 # filters afterwards, so a small assignment surrounded by closer rows from other
 # assignments could come back with too few results. The first statement switches
 # on pgvector's "keep looking until enough rows pass the filter" mode
-# (iterative scan) for this one transaction, which fixes that.
+# (iterative scan) for this one transaction. That fixes the common case. It still
+# stops after pgvector's scan limit (hnsw.max_scan_tuples, 20000 rows by
+# default), so a small assignment hidden behind tens of thousands of closer rows
+# from other assignments could still come back short. If that ever matters:
+# raise the limit, rank inside one assignment exactly (filter first, then sort),
+# or split the table by assignment.
 def search_examples(request):
     embedding = _vector_text(embed_text(request.query_text))
     with connect() as connection:
