@@ -17,7 +17,6 @@ images:
 # without it the ConfigMap lands in the wrong room and the pod cannot find it.
 configMapGenerator:
   - name: knowledge-db-init-password
-    namespace: knowledge
     files:
       - 02-set-app-password.sh=set-app-password.sh
 generatorOptions:
