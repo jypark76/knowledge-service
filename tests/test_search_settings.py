@@ -49,13 +49,14 @@ class RecordingConnection:
 # In plain English: sets up the pretend connection and a pretend embedding, runs one
 # search for a random assignment, and gives back what the search returned and what
 # the recorder saw.
-def run_search(monkeypatch, has_examples=True, rows=None):
+def run_search(monkeypatch, has_examples=True, rows=None, fallback=False):
     recorder = RecordingConnection(has_examples=has_examples, rows=rows)
     monkeypatch.setattr(examples, "connect", lambda: recorder)
     monkeypatch.setattr(examples, "embed_text", lambda text: [0.0] * 384)
-    results = search_examples(
-        SearchRequest(assignment_id=uuid.uuid4(), query_text="cells produce energy")
-    )
+    request = {"assignment_id": uuid.uuid4(), "query_text": "cells produce energy"}
+    if fallback:
+        request["fallback_to_all"] = True
+    results = search_examples(SearchRequest(**request))
     return results, recorder
 
 
@@ -91,8 +92,8 @@ def test_search_stays_inside_the_assignment_when_it_has_examples(monkeypatch):
 
 # In plain English: when the assignment has none, the search must NOT be limited to
 # it, so a brand-new assignment still gets examples from the others.
-def test_search_looks_across_all_assignments_when_it_has_none(monkeypatch):
-    _, recorder = run_search(monkeypatch, has_examples=False)
+def test_search_looks_across_all_assignments_when_it_has_none_and_the_caller_asks(monkeypatch):
+    _, recorder = run_search(monkeypatch, has_examples=False, fallback=True)
 
     final_search = recorder.statements[-1]
     assert "WHERE assignment_id" not in final_search
@@ -114,7 +115,29 @@ def test_results_from_inside_the_assignment_are_flagged_true(monkeypatch):
 # grader can say "this came from a different assignment".
 def test_results_from_other_assignments_are_flagged_false(monkeypatch):
     other = uuid.uuid4()
-    results, _ = run_search(monkeypatch, has_examples=False, rows=[fake_row(other)])
+    results, _ = run_search(monkeypatch, has_examples=False, rows=[fake_row(other)], fallback=True)
 
     assert results[0]["same_assignment"] is False
     assert results[0]["assignment_id"] == str(other)
+
+
+# In plain English: the wall. An assignment the service has never seen (a typo, a made-up
+# ID, or a real new assignment whose caller did not ask to borrow) must get NOTHING back,
+# even if other assignments hold examples. The pretend database is scripted to hand back
+# a row if a search ran, so an empty answer proves no search ran at all: only the setting
+# and the "does it have examples?" question were sent.
+def test_search_returns_nothing_for_an_assignment_with_no_examples_unless_asked(monkeypatch):
+    results, recorder = run_search(
+        monkeypatch, has_examples=False, rows=[fake_row(uuid.uuid4())], fallback=False
+    )
+
+    assert results == []
+    assert len(recorder.statements) == 2
+
+
+# In plain English: asking to borrow never overrides an assignment's own examples. With
+# the flag on and examples of its own, the search still stays inside the assignment.
+def test_asking_to_borrow_does_not_override_the_assignments_own_examples(monkeypatch):
+    _, recorder = run_search(monkeypatch, has_examples=True, fallback=True)
+
+    assert "WHERE assignment_id" in recorder.statements[-1]

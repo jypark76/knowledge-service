@@ -192,3 +192,13 @@ def test_extra_field_names_are_never_echoed():
     search_response = client.post("/examples/search", json=search_data)
     assert_extra_field_refused(search_response)
     assert "SECRET-MARKER-12345" not in search_response.text
+
+
+# In plain English: the borrow flag must be a real true or false. Words like "yes" and
+# numbers like 1 are refused, so nobody turns the fallback on by accident with a value
+# that only looks like true.
+def test_search_rejects_a_fallback_flag_that_is_not_true_or_false():
+    for bad in ("yes", 1, "maybe"):
+        data = good_search()
+        data["fallback_to_all"] = bad
+        assert_refused(client.post("/examples/search", json=data), "fallback_to_all")

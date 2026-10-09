@@ -32,7 +32,7 @@ names.
 |---|---|
 | `POST /examples` | Save an approved example and compute its embedding |
 | `GET /examples?assignment_id=...` | List the examples for one assignment (newest first, up to 100) |
-| `POST /examples/search` | Return the examples most similar in meaning to some text. It searches inside the assignment, and if the assignment has no examples at all it falls back to similar examples from every assignment. Each result carries its `assignment_id` and a `same_assignment` flag, so the caller can tell borrowed examples from the assignment's own |
+| `POST /examples/search` | Return the examples most similar in meaning to some text. It searches inside the assignment. If the assignment has no examples at all it returns nothing, unless the caller sets `fallback_to_all` to `true`, which borrows similar examples from every assignment. The flag is off by default, so an unknown assignment ID cannot read other assignments' work. Each result carries its `assignment_id` and a `same_assignment` flag, so the caller can tell borrowed examples from the assignment's own |
 | `GET /health` | Report whether the service is alive |
 | `GET /ready` | Report whether the service can reach its database |
 
