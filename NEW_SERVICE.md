@@ -87,7 +87,7 @@ before the real features.
 4. Deploy path: `k8s/base`, the local overlay and `deploy.sh`. Create the Secret by
    hand. Deploy the bare service and watch it become ready.
 5. If it owns data: `db/init.sql` and the first-start password script together, then
-   prove the limited login with a refused `DELETE`.
+   prove the limited login: it connects, changing or deleting rows is refused, and so is creating tables.
 6. Add the real routes one at a time, each with strict input rules and a test that
    breaks it on purpose. Redeploy after each one.
 7. Run the clean-room test: wipe the database disk and the deployments, redeploy from
