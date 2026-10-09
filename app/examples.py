@@ -4,7 +4,7 @@
 # the database: one that saves an example and one that lists them.
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 from app.db import connect
 from app.embeddings import embed_text
@@ -50,6 +50,11 @@ class SearchRequest(BaseModel):
     assignment_id: UUID
     query_text: str = Field(min_length=1, max_length=20000)
     limit: int = Field(default=3, ge=1, le=10)
+
+    # Off unless the caller turns it on. When on, an assignment with no examples of its
+    # own may borrow similar examples from every other assignment. It must be a real
+    # true or false, so a word or number that only looks like true cannot switch it on.
+    fallback_to_all: StrictBool = False
 
     # The text to compare gets the same storable-text check.
     _check_text = field_validator("query_text")(_must_be_storable_text)
@@ -119,10 +124,18 @@ def list_examples(assignment_id):
 #   - Yes: it searches ONLY inside that assignment. Its own examples always win, even
 #     if another assignment holds one that sounds closer. Results are flagged
 #     same_assignment = true.
-#   - No (a brand-new assignment): it searches across ALL assignments, so the grader
-#     still gets something to learn from. Results are flagged same_assignment = false
-#     and carry their own assignment_id, so the grader can say they came from a
-#     different assignment.
+#   - No, and the caller asked to borrow (fallback_to_all = true): it searches across
+#     ALL assignments, so a brand-new assignment still gets something to learn from.
+#     Results are flagged same_assignment = false and carry their own assignment_id, so
+#     the grader can say they came from a different assignment.
+#   - No, and the caller did not ask to borrow: it returns nothing, so a typo or a
+#     made-up ID does not read other assignments' work by accident. This guards
+#     against accidents, not against a caller who wants the data: the flag travels in
+#     the same unauthenticated request, so such a caller can simply set it. The
+#     service cannot tell a real new assignment from a made-up ID, because the
+#     assessment service owns the list of assignments, so the CALLER says when
+#     borrowing is wanted. Real protection needs authentication, or a check that the
+#     assignment exists.
 #
 # The fast index only looks at about 40 candidates from ALL assignments and filters
 # afterwards, so a small assignment surrounded by closer rows from other assignments
@@ -149,7 +162,7 @@ def search_examples(request):
                 "ORDER BY embedding <=> %s::vector LIMIT %s",
                 (embedding, request.assignment_id, embedding, request.limit),
             ).fetchall()
-        else:
+        elif request.fallback_to_all:
             rows = connection.execute(
                 "SELECT example_id, assignment_id, student_work, grade, reasoning, "
                 "1 - (embedding <=> %s::vector) AS similarity "
@@ -157,6 +170,8 @@ def search_examples(request):
                 "ORDER BY embedding <=> %s::vector LIMIT %s",
                 (embedding, embedding, request.limit),
             ).fetchall()
+        else:
+            rows = []
     return [
         {
             "example_id": str(row[0]),

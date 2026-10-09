@@ -32,7 +32,7 @@ names.
 |---|---|
 | `POST /examples` | Save an approved example and compute its embedding |
 | `GET /examples?assignment_id=...` | List the examples for one assignment (newest first, up to 100) |
-| `POST /examples/search` | Return the examples most similar in meaning to some text. It searches inside the assignment, and if the assignment has no examples at all it falls back to similar examples from every assignment. Each result carries its `assignment_id` and a `same_assignment` flag, so the caller can tell borrowed examples from the assignment's own |
+| `POST /examples/search` | Return the examples most similar in meaning to some text. It searches inside the assignment. If the assignment has no examples at all it returns nothing, unless the caller sets `fallback_to_all` to `true`, which borrows similar examples from every assignment. The flag is off by default, which protects against typos and accidents. It is not a security control, because it travels in the same request and the service has no authentication. Each result carries its `assignment_id` and a `same_assignment` flag, so the caller can tell borrowed examples from the assignment's own |
 | `GET /health` | Report whether the service is alive |
 | `GET /ready` | Report whether the service can reach its database |
 
@@ -124,6 +124,7 @@ for the rename command, what to rewrite, the one-time GitHub setup and the order
 
 ## Known limits
 
+- The `fallback_to_all` flag guards against typos and accidents, not against a caller who wants the data. It travels in the same unauthenticated request, so any caller that can reach the service can set it with any assignment ID and read other assignments' examples. Real protection needs authentication, or the caller checking that the assignment exists. The service is internal-only for now.
 - Search uses pgvector's HNSW index with iterative scan switched on, which stops
   after 20000 scanned rows (`hnsw.max_scan_tuples`). A small assignment hidden
   behind tens of thousands of closer examples from other assignments could still

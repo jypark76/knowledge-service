@@ -229,10 +229,12 @@ def test_filtered_index_search_needs_iterative_scan_to_find_a_small_assignment()
 # geography topics are used by only one test each, and the checks look at the example's
 # text and flags, not its id, which keeps them reliable on a database that still holds
 # rows from earlier runs.
-def search(assignment_id, query_text, limit=None):
+def search(assignment_id, query_text, limit=None, fallback=False):
     body = {"assignment_id": assignment_id, "query_text": query_text}
     if limit is not None:
         body["limit"] = limit
+    if fallback:
+        body["fallback_to_all"] = True
     return client.post("/examples/search", json=body).json()
 
 
@@ -246,7 +248,7 @@ def test_new_assignment_borrows_examples_from_another_assignment():
     history_102 = new_assignment()
     save(history_101, "The French Revolution began in 1789.", "A")
 
-    results = search(history_102, "When did the French Revolution start?")
+    results = search(history_102, "When did the French Revolution start?", fallback=True)
 
     assert results[0]["student_work"] == "The French Revolution began in 1789."
     assert results[0]["same_assignment"] is False
@@ -265,7 +267,7 @@ def test_assignment_with_its_own_examples_ignores_better_matches_elsewhere():
     save(biology_101, "The mitochondria makes energy for the cell.", "A")
     own = save(biology_102, "Plants make food from sunlight.", "B")
 
-    results = search(biology_102, "cells produce energy")
+    results = search(biology_102, "cells produce energy", fallback=True)
 
     assert [item["example_id"] for item in results] == [own]
     assert results[0]["same_assignment"] is True
@@ -284,10 +286,27 @@ def test_fallback_respects_the_limit_and_ranks_best_first():
     save(geography_101, "The Amazon carries more water than any other river.", "B")
     save(geography_101, "Rivers flow downhill toward the sea.", "C")
 
-    results = search(geography_102, "Which river is the longest in Africa?", limit=2)
+    results = search(geography_102, "Which river is the longest in Africa?", limit=2, fallback=True)
 
     assert len(results) == 2
     assert results[0]["student_work"] == "The Nile is the longest river in Africa."
     assert results[0]["similarity"] > 0.8
     assert results[0]["similarity"] >= results[1]["similarity"]
     assert all(item["same_assignment"] is False for item in results)
+
+
+# In plain English: the wall, tested for real. An assignment ID the service has never seen
+# must get NOTHING back unless the caller explicitly asks to borrow, even though another
+# assignment holds a perfect match. With the flag on, the same search borrows it and
+# says so.
+def test_unknown_assignment_gets_nothing_unless_the_caller_asks_to_borrow():
+    other = new_assignment()
+    unknown = new_assignment()
+    save(other, "The Magna Carta was signed in 1215.", "A")
+
+    without_flag = search(unknown, "When was the Magna Carta signed?")
+    with_flag = search(unknown, "When was the Magna Carta signed?", fallback=True)
+
+    assert without_flag == []
+    assert with_flag[0]["student_work"] == "The Magna Carta was signed in 1215."
+    assert with_flag[0]["same_assignment"] is False
