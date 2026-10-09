@@ -109,6 +109,11 @@ before the real features.
   a secret-looking marker, and check it never comes back.
 - Tests that need a database refuse to run unless it is named `<name>_test`, and CI sets
   a flag so a skipped test counts as a failure.
+- The pipeline job with the database runs every test file, never a list of "database
+  files". The job without a database skips those tests quietly and still passes, so a
+  file missing from a list runs nowhere. This happened on the assessment service: five
+  test files never ran in the pipeline until a review caught it. After adding a test
+  file, open the job log and check the test count went up.
 - Run every new pipeline check on your own computer before the first pipeline run. In
   Git Bash on Windows put `MSYS_NO_PATHCONV=1` in front of `docker` commands that
   contain paths.
