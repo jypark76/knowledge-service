@@ -108,41 +108,64 @@ def list_examples(assignment_id):
     ]
 
 
-# In plain English: finds the saved examples whose MEANING is closest to the
-# given text, but only inside the one assignment asked about. It turns the text
-# into 384 numbers, then lets the database rank saved examples by how close
-# their numbers ("cosine distance", using the fast index). Each result gets
-# a similarity score: 1 means practically identical, lower means less alike.
-# This only reads; it changes nothing.
+# In plain English: finds the saved examples whose MEANING is closest to the given
+# text. It turns the text into 384 numbers, then lets the database rank saved
+# examples by how close their numbers are ("cosine distance", using the fast
+# index). Each result gets a similarity score: 1 means practically identical, lower
+# means less alike. This only reads; it changes nothing.
 #
-# The fast index only looks at about 40 candidates from ALL assignments and
-# filters afterwards, so a small assignment surrounded by closer rows from other
-# assignments could come back with too few results. The first statement switches
-# on pgvector's "keep looking until enough rows pass the filter" mode
-# (iterative scan) for this one transaction. That fixes the common case. It still
-# stops after pgvector's scan limit (hnsw.max_scan_tuples, 20000 rows by
-# default), so a small assignment hidden behind tens of thousands of closer rows
-# from other assignments could still come back short. If that ever matters:
-# raise the limit, rank inside one assignment exactly (filter first, then sort),
-# or split the table by assignment.
+# Where it looks depends on one quick question: "does this assignment have any
+# examples of its own?"
+#   - Yes: it searches ONLY inside that assignment. Its own examples always win, even
+#     if another assignment holds one that sounds closer. Results are flagged
+#     same_assignment = true.
+#   - No (a brand-new assignment): it searches across ALL assignments, so the grader
+#     still gets something to learn from. Results are flagged same_assignment = false
+#     and carry their own assignment_id, so the grader can say they came from a
+#     different assignment.
+#
+# The fast index only looks at about 40 candidates from ALL assignments and filters
+# afterwards, so a small assignment surrounded by closer rows from other assignments
+# could come back with too few results. The first statement switches on pgvector's
+# "keep looking until enough rows pass the filter" mode (iterative scan) for this
+# one transaction. That fixes the common case. It still stops after pgvector's scan
+# limit (hnsw.max_scan_tuples, 20000 rows by default), so a small assignment hidden
+# behind tens of thousands of closer rows from other assignments could still come
+# back short. If that ever matters: raise the limit, rank inside one assignment
+# exactly (filter first, then sort), or split the table by assignment.
 def search_examples(request):
     embedding = _vector_text(embed_text(request.query_text))
     with connect() as connection:
         connection.execute("SET LOCAL hnsw.iterative_scan = strict_order")
-        rows = connection.execute(
-            "SELECT example_id, student_work, grade, reasoning, "
-            "1 - (embedding <=> %s::vector) AS similarity "
-            "FROM examples WHERE assignment_id = %s "
-            "ORDER BY embedding <=> %s::vector LIMIT %s",
-            (embedding, request.assignment_id, embedding, request.limit),
-        ).fetchall()
+        has_examples = connection.execute(
+            "SELECT EXISTS (SELECT 1 FROM examples WHERE assignment_id = %s)",
+            (request.assignment_id,),
+        ).fetchone()[0]
+        if has_examples:
+            rows = connection.execute(
+                "SELECT example_id, assignment_id, student_work, grade, reasoning, "
+                "1 - (embedding <=> %s::vector) AS similarity "
+                "FROM examples WHERE assignment_id = %s "
+                "ORDER BY embedding <=> %s::vector LIMIT %s",
+                (embedding, request.assignment_id, embedding, request.limit),
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                "SELECT example_id, assignment_id, student_work, grade, reasoning, "
+                "1 - (embedding <=> %s::vector) AS similarity "
+                "FROM examples "
+                "ORDER BY embedding <=> %s::vector LIMIT %s",
+                (embedding, embedding, request.limit),
+            ).fetchall()
     return [
         {
             "example_id": str(row[0]),
-            "student_work": row[1],
-            "grade": row[2],
-            "reasoning": row[3],
-            "similarity": round(float(row[4]), 4),
+            "assignment_id": str(row[1]),
+            "same_assignment": has_examples,
+            "student_work": row[2],
+            "grade": row[3],
+            "reasoning": row[4],
+            "similarity": round(float(row[5]), 4),
         }
         for row in rows
     ]

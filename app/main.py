@@ -19,7 +19,7 @@ from app.examples import (
 
 # Create the web application. The title and version show up on the automatic
 # documentation page FastAPI builds at /docs.
-app = FastAPI(title="Knowledge service", version="0.4.1")
+app = FastAPI(title="Knowledge service", version="0.5.0")
 
 
 # In plain English: the kinds of error whose built-in wording is safe, because it
@@ -125,8 +125,9 @@ def get_examples(assignment_id: UUID):
         return JSONResponse(status_code=503, content={"ok": False})
 
 
-# In plain English: finds the saved examples closest in meaning to some text,
-# inside one assignment. Bad input is turned away by FastAPI (422) before our
+# In plain English: finds the saved examples closest in meaning to some text. It
+# searches inside the assignment, and falls back to every assignment when the
+# assignment has no examples of its own. Bad input is turned away by FastAPI (422) before our
 # code runs; a database problem gives a plain 503 with no details. This is a
 # POST only because the text to compare can be long, not because it saves
 # anything.
