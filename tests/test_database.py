@@ -120,8 +120,10 @@ def test_search_ranks_the_closest_meaning_first():
     assert results[0]["similarity"] > results[1]["similarity"]
 
 
-# In plain English: search must stay inside one assignment. Two assignments hold
-# near identical text, and a search in one must never return the other's example.
+# In plain English: when an assignment has its own examples, search stays inside it.
+# Two assignments hold near identical text, and a search in one must never return the
+# other's example. (An assignment with NO examples is different: it falls back to the
+# others, and the tests at the end of this file cover that.)
 def test_search_never_returns_another_assignments_examples():
     first = new_assignment()
     second = new_assignment()
@@ -219,3 +221,73 @@ def test_filtered_index_search_needs_iterative_scan_to_find_a_small_assignment()
     plan, rows = run(iterative=True)
     assert "examples_embedding_idx" in plan
     assert len(rows) == 1
+
+
+# In plain English: the tests below cover the fallback: what a search does when the
+# assignment asked about has no examples of its own. That search looks across EVERY
+# example in the database, including the ones other tests saved. So the history and
+# geography topics are used by only one test each, and the checks look at the example's
+# text and flags, not its id, which keeps them reliable on a database that still holds
+# rows from earlier runs.
+def search(assignment_id, query_text, limit=None):
+    body = {"assignment_id": assignment_id, "query_text": query_text}
+    if limit is not None:
+        body["limit"] = limit
+    return client.post("/examples/search", json=body).json()
+
+
+# In plain English: the cold-start case. History 102 is brand new and has no examples,
+# but History 101 has one. A reworded question about the French Revolution must still
+# find History 101's example, say it came from elsewhere, and score it high. For
+# reference the real model scores this pair at about 0.91, and about 0.40 against
+# unrelated biology.
+def test_new_assignment_borrows_examples_from_another_assignment():
+    history_101 = new_assignment()
+    history_102 = new_assignment()
+    save(history_101, "The French Revolution began in 1789.", "A")
+
+    results = search(history_102, "When did the French Revolution start?")
+
+    assert results[0]["student_work"] == "The French Revolution began in 1789."
+    assert results[0]["same_assignment"] is False
+    assert results[0]["assignment_id"] != history_102
+    assert results[0]["similarity"] > 0.8
+    assert all(item["same_assignment"] is False for item in results)
+
+
+# In plain English: the old rule. Biology 101 holds the BETTER match for the question
+# (score about 0.88). Biology 102 holds its own, weaker example (about 0.69). Because
+# Biology 102 has an example of its own, only that one may come back, flagged true, and
+# Biology 101's better match must be ignored.
+def test_assignment_with_its_own_examples_ignores_better_matches_elsewhere():
+    biology_101 = new_assignment()
+    biology_102 = new_assignment()
+    save(biology_101, "The mitochondria makes energy for the cell.", "A")
+    own = save(biology_102, "Plants make food from sunlight.", "B")
+
+    results = search(biology_102, "cells produce energy")
+
+    assert [item["example_id"] for item in results] == [own]
+    assert results[0]["same_assignment"] is True
+    assert results[0]["assignment_id"] == biology_102
+    assert results[0]["similarity"] < 0.8
+
+
+# In plain English: the fallback respects the limit and ranks best first. Geography 101
+# holds three river examples and Geography 102 holds none. Asking for 2 about the
+# longest river in Africa must return exactly 2, with the Nile example first (about
+# 0.90, against about 0.63 for the Amazon one), all flagged false.
+def test_fallback_respects_the_limit_and_ranks_best_first():
+    geography_101 = new_assignment()
+    geography_102 = new_assignment()
+    save(geography_101, "The Nile is the longest river in Africa.", "A")
+    save(geography_101, "The Amazon carries more water than any other river.", "B")
+    save(geography_101, "Rivers flow downhill toward the sea.", "C")
+
+    results = search(geography_102, "Which river is the longest in Africa?", limit=2)
+
+    assert len(results) == 2
+    assert results[0]["student_work"] == "The Nile is the longest river in Africa."
+    assert results[0]["similarity"] > 0.8
+    assert results[0]["similarity"] >= results[1]["similarity"]
+    assert all(item["same_assignment"] is False for item in results)
