@@ -89,7 +89,9 @@ before the real features.
 5. If it owns data: `db/init.sql` and the first-start password script together, then
    prove the limited login: it connects, changing or deleting rows is refused, and so is creating tables.
 6. Add the real routes one at a time, each with strict input rules and a test that
-   breaks it on purpose. Redeploy after each one.
+   breaks it on purpose. Deploy in batches, not after every route: when a caller needs
+   the service or a group of routes is done. The tests and the pipeline already prove
+   each route, so a deploy per route adds work without new evidence.
 7. Run the clean-room test: wipe the database disk and the deployments, redeploy from
    the repo plus the hand-made Secret, and read the log for the setup lines. Do not
    delete any pod during the test.
