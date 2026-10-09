@@ -128,11 +128,14 @@ def list_examples(assignment_id):
 #     ALL assignments, so a brand-new assignment still gets something to learn from.
 #     Results are flagged same_assignment = false and carry their own assignment_id, so
 #     the grader can say they came from a different assignment.
-#   - No, and the caller did not ask to borrow: it returns nothing. An ID the service
-#     has never seen (a typo, a made-up ID) must not be able to read other
-#     assignments' work. The service cannot tell a real new assignment from a made-up
-#     ID, because the assessment service owns the list of assignments, so the CALLER
-#     says when borrowing is wanted.
+#   - No, and the caller did not ask to borrow: it returns nothing, so a typo or a
+#     made-up ID does not read other assignments' work by accident. This guards
+#     against accidents, not against a caller who wants the data: the flag travels in
+#     the same unauthenticated request, so such a caller can simply set it. The
+#     service cannot tell a real new assignment from a made-up ID, because the
+#     assessment service owns the list of assignments, so the CALLER says when
+#     borrowing is wanted. Real protection needs authentication, or a check that the
+#     assignment exists.
 #
 # The fast index only looks at about 40 candidates from ALL assignments and filters
 # afterwards, so a small assignment surrounded by closer rows from other assignments
