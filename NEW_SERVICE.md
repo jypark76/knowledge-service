@@ -89,7 +89,9 @@ before the real features.
 5. If it owns data: `db/init.sql` and the first-start password script together, then
    prove the limited login: it connects, changing or deleting rows is refused, and so is creating tables.
 6. Add the real routes one at a time, each with strict input rules and a test that
-   breaks it on purpose. Redeploy after each one.
+   breaks it on purpose. Deploy in batches, not after every route: when a caller needs
+   the service or a group of routes is done. The tests and the pipeline already prove
+   each route, so a deploy per route adds work without new evidence.
 7. Run the clean-room test: wipe the database disk and the deployments, redeploy from
    the repo plus the hand-made Secret, and read the log for the setup lines. Do not
    delete any pod during the test.
@@ -109,6 +111,11 @@ before the real features.
   a secret-looking marker, and check it never comes back.
 - Tests that need a database refuse to run unless it is named `<name>_test`, and CI sets
   a flag so a skipped test counts as a failure.
+- The pipeline job with the database runs every test file, never a list of "database
+  files". The job without a database skips those tests quietly and still passes, so a
+  file missing from a list runs nowhere. This happened on the assessment service: five
+  test files never ran in the pipeline until a review caught it. After adding a test
+  file, open the job log and check the test count went up.
 - Run every new pipeline check on your own computer before the first pipeline run. In
   Git Bash on Windows put `MSYS_NO_PATHCONV=1` in front of `docker` commands that
   contain paths.
