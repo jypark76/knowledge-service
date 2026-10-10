@@ -2,8 +2,11 @@
 # at the door. They need no database, because a bad request is refused before
 # any database work starts. They also check that the refusal message never
 # repeats back what the caller sent.
+from uuid import UUID
+
 from fastapi.testclient import TestClient
 
+from app.examples import NewExample
 from app.main import app
 
 client = TestClient(app)
@@ -202,3 +205,23 @@ def test_search_rejects_a_fallback_flag_that_is_not_true_or_false():
         data = good_search()
         data["fallback_to_all"] = bad
         assert_refused(client.post("/examples/search", json=data), "fallback_to_all")
+
+
+# In plain English: the label saying which submission an example came from is
+# optional, and when it is given it is read as a real UUID. This checks the rules
+# directly, so it needs no database.
+def test_the_source_label_is_optional_and_read_as_a_uuid():
+    assert NewExample(**good_example()).source_submission_id is None
+    labelled = NewExample(**good_example(), source_submission_id=GOOD_ID)
+    assert labelled.source_submission_id == UUID(GOOD_ID)
+
+
+# In plain English: a label that is not a UUID is refused with fixed wording, and
+# the reply never repeats what was sent. A number is refused the same way.
+def test_save_rejects_a_bad_source_label_without_repeating_it():
+    for bad in ("SECRET-MARKER-12345", 12345):
+        data = good_example()
+        data["source_submission_id"] = bad
+        response = client.post("/examples", json=data)
+        assert_refused(response, "source_submission_id")
+        assert "SECRET-MARKER" not in response.text

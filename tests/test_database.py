@@ -12,15 +12,17 @@
 # container yourself (see the README) and point the DB_* settings at it.
 import os
 import random
+import threading
 import uuid
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from app import examples as examples_module
 from app.db import connect
 from app.embeddings import embed_text
-from app.examples import _vector_text
+from app.examples import NewExample, _vector_text, save_example
 from app.main import app
 
 client = TestClient(app)
@@ -324,3 +326,233 @@ def test_limited_login_connects_but_cannot_create_tables():
     with pytest.raises(psycopg.errors.InsufficientPrivilege):
         with connect() as connection:
             connection.execute("CREATE TABLE should_not_exist (id int)")
+
+
+# ---------------------------------------------------------------------------
+# The source label: saving the same approved example twice stores it once
+# ---------------------------------------------------------------------------
+
+CONFLICT = {"problem": "This source_submission_id is already used for a different example"}
+WORK = "The mitochondria makes energy for the cell."
+
+
+# In plain English: saves an example that carries a label, and returns the whole
+# reply without judging it, so a test can look at the status code.
+def post_labelled(assignment, label, work=WORK, grade="A", reasoning="Correct."):
+    return client.post(
+        "/examples",
+        json={
+            "assignment_id": assignment,
+            "student_work": work,
+            "grade": grade,
+            "reasoning": reasoning,
+            "source_submission_id": label,
+        },
+    )
+
+
+# In plain English: every saved example that carries this label, read straight
+# from the database.
+def rows_with_label(label):
+    with connect() as connection:
+        return connection.execute(
+            "SELECT example_id, student_work, grade FROM examples WHERE source_submission_id = %s",
+            (uuid.UUID(label),),
+        ).fetchall()
+
+
+# In plain English: a labelled example is saved with its label in the database.
+def test_a_labelled_example_is_saved_with_its_label():
+    label = str(uuid.uuid4())
+    response = post_labelled(new_assignment(), label)
+    assert response.status_code == 201
+    rows = rows_with_label(label)
+    assert [str(row[0]) for row in rows] == [response.json()["example_id"]]
+
+
+# In plain English: sending the same label with the same content again (Kafka can
+# deliver a message twice) returns the original example with a 200 and saves
+# nothing new. The first send is the control and answers 201.
+def test_the_same_label_and_content_returns_the_original():
+    assignment, label = new_assignment(), str(uuid.uuid4())
+    first = post_labelled(assignment, label)
+    assert first.status_code == 201
+
+    repeat = post_labelled(assignment, label)
+    assert repeat.status_code == 200
+    assert repeat.json() == first.json()
+    assert len(rows_with_label(label)) == 1
+
+
+# In plain English: spotting a repeat must happen BEFORE the slow step. Turning the
+# essay into 384 numbers is the expensive part, so a repeat, and a clash, must not
+# pay for it. The first save is the control and does the work once.
+def test_a_repeat_does_not_redo_the_slow_embedding(monkeypatch):
+    calls = []
+    real_embed = examples_module.embed_text
+    monkeypatch.setattr(
+        examples_module, "embed_text", lambda text: (calls.append(text), real_embed(text))[1]
+    )
+    assignment, label = new_assignment(), str(uuid.uuid4())
+
+    assert post_labelled(assignment, label).status_code == 201
+    assert len(calls) == 1
+    assert post_labelled(assignment, label).status_code == 200
+    assert post_labelled(assignment, label, grade="C").status_code == 409
+    assert len(calls) == 1
+
+
+# In plain English: the same label with DIFFERENT content is refused with fixed
+# wording that repeats none of it, and the original stays as it was. A different
+# essay, grade, reasoning and assignment are each tried. The first save is the control.
+def test_the_same_label_with_different_content_is_refused_and_changes_nothing():
+    assignment, label = new_assignment(), str(uuid.uuid4())
+    assert post_labelled(assignment, label).status_code == 201
+
+    clashes = [
+        post_labelled(assignment, label, work="SECRET-MARKER a different essay."),
+        post_labelled(assignment, label, grade="SECRET-MARKER-C"),
+        post_labelled(assignment, label, reasoning="SECRET-MARKER different reasons."),
+        post_labelled(new_assignment(), label),
+    ]
+    for response in clashes:
+        assert response.status_code == 409
+        assert response.json() == CONFLICT
+        assert "SECRET-MARKER" not in response.text
+
+    rows = rows_with_label(label)
+    assert len(rows) == 1
+    assert rows[0][1] == WORK and rows[0][2] == "A"
+
+
+# In plain English: examples WITHOUT a label are never merged, even when identical.
+# That is how saving worked before, and it must not change. Two labels that differ
+# are two different examples too.
+def test_unlabelled_examples_and_different_labels_are_all_kept():
+    assignment = new_assignment()
+    body = {"assignment_id": assignment, "student_work": WORK, "grade": "A", "reasoning": "Correct."}
+    first = client.post("/examples", json=body)
+    second = client.post("/examples", json=body)
+    assert first.status_code == second.status_code == 201
+    assert first.json() != second.json()
+
+    one, two = str(uuid.uuid4()), str(uuid.uuid4())
+    assert post_labelled(assignment, one).status_code == 201
+    assert post_labelled(assignment, two).status_code == 201
+    listed = client.get("/examples", params={"assignment_id": assignment}).json()
+    assert len(listed) == 4
+
+
+# In plain English: a stand-in for a database connection that acts exactly like the
+# real one, except that just before the service's first INSERT it lets a competing
+# save go first. That is the moment a real race would hit: the service has checked
+# "is this label taken?", found nothing, and is about to write, when someone else's
+# row lands in between.
+class RacingConnection:
+    def __init__(self, real, before_insert, state):
+        self.real, self.before_insert, self.state = real, before_insert, state
+
+    def __enter__(self):
+        self.real.__enter__()
+        return self
+
+    def __exit__(self, *details):
+        return self.real.__exit__(*details)
+
+    def execute(self, sql, params=()):
+        if sql.lstrip().upper().startswith("INSERT") and not self.state["fired"]:
+            self.state["fired"] = 1
+            self.before_insert()
+        return self.real.execute(sql, params)
+
+
+# In plain English: plants the collision. The first INSERT the service makes is
+# preceded by the competitor, once. The competitor's own save uses the normal path.
+def plant_collision(monkeypatch, competitor):
+    real_connect = examples_module.connect
+    state = {"fired": 0}
+    monkeypatch.setattr(
+        examples_module, "connect", lambda: RacingConnection(real_connect(), competitor, state)
+    )
+    return state
+
+
+def competing_save(assignment, label, grade="A"):
+    return save_example(
+        NewExample(
+            assignment_id=assignment,
+            student_work=WORK,
+            grade=grade,
+            reasoning="Correct.",
+            source_submission_id=label,
+        )
+    )
+
+
+# In plain English: the SAME example lands first. The service's own write finds the
+# label taken, looks again, sees its own example already saved and answers 200 with
+# the competitor's ID, as for a repeat. There is still exactly one row.
+def test_a_save_that_loses_the_race_to_the_same_example_is_treated_as_a_repeat(monkeypatch):
+    assignment, label = new_assignment(), str(uuid.uuid4())
+    winner = []
+    state = plant_collision(monkeypatch, lambda: winner.append(competing_save(assignment, label)))
+
+    response = post_labelled(assignment, label)
+
+    assert state["fired"] == 1
+    assert response.status_code == 200
+    assert response.json() == {"example_id": winner[0][0]}
+    assert len(rows_with_label(label)) == 1
+
+
+# In plain English: a DIFFERENT example lands first. The service looks again and
+# answers 409. The competitor's example is the one that stays, and there is one row.
+def test_a_save_that_loses_the_race_to_a_different_example_gets_a_conflict(monkeypatch):
+    assignment, label = new_assignment(), str(uuid.uuid4())
+    state = plant_collision(monkeypatch, lambda: competing_save(assignment, label, grade="B"))
+
+    response = post_labelled(assignment, label, grade="A")
+
+    assert state["fired"] == 1
+    assert response.status_code == 409
+    assert response.json() == CONFLICT
+    rows = rows_with_label(label)
+    assert len(rows) == 1 and rows[0][2] == "B"
+
+
+# In plain English: eight copies of the same message arrive at the same instant.
+# Exactly one is saved (201), the other seven are recognised (200) and all eight get
+# the same example ID. One row exists afterwards. This is a real race, not a planted one.
+def test_eight_identical_saves_at_once_store_one_example():
+    assignment, label = new_assignment(), str(uuid.uuid4())
+    barrier = threading.Barrier(8)
+    results = [None] * 8
+
+    def worker(index):
+        local_client = TestClient(app)
+        barrier.wait()
+        try:
+            results[index] = local_client.post(
+                "/examples",
+                json={
+                    "assignment_id": assignment,
+                    "student_work": WORK,
+                    "grade": "A",
+                    "reasoning": "Correct.",
+                    "source_submission_id": label,
+                },
+            )
+        except Exception as error:
+            results[index] = error
+
+    threads = [threading.Thread(target=worker, args=(index,)) for index in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    for result in results:
+        assert not isinstance(result, Exception), result
+    assert sorted(result.status_code for result in results) == [200] * 7 + [201]
+    assert len({result.json()["example_id"] for result in results}) == 1
+    assert len(rows_with_label(label)) == 1
