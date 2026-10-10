@@ -556,3 +556,19 @@ def test_eight_identical_saves_at_once_store_one_example():
     assert sorted(result.status_code for result in results) == [200] * 7 + [201]
     assert len({result.json()["example_id"] for result in results}) == 1
     assert len(rows_with_label(label)) == 1
+
+
+# In plain English: long reasoning really is saved. A 6,000 character reasoning (past the
+# old limit of 5,000) and the longest allowed, 10,000, both go in and come back whole.
+def test_long_reasoning_is_saved_whole():
+    assignment = new_assignment()
+    for length in (6_000, 10_000):
+        reasoning = "r" * length
+        response = client.post(
+            "/examples",
+            json={"assignment_id": assignment, "student_work": f"Essay {length}", "grade": "A", "reasoning": reasoning},
+        )
+        assert response.status_code == 201, length
+    stored = {item["student_work"]: len(item["reasoning"])
+              for item in client.get("/examples", params={"assignment_id": assignment}).json()}
+    assert stored == {"Essay 6000": 6_000, "Essay 10000": 10_000}

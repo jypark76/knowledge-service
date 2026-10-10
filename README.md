@@ -66,6 +66,11 @@ and examples saved without a label, have none, and any number of those can exist
 Bad input is refused with a 422 that names the field and the reason but never
 repeats what the caller sent.
 
+An example's limits are 20,000 characters of student work, 100 of grade and 10,000 of
+reasoning. They are the same limits as in the agreed message format for approved examples
+(`platform/contracts/approved-examples.md`), and a test checks them against that table.
+The sender must never accept more than these.
+
 A repeat of a labelled example is recognised before the slow step (turning the essay
 into 384 numbers), so it costs almost nothing. If two copies arrive at the same instant,
 the database itself lets only one row for a label exist, and the other request looks

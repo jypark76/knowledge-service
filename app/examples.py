@@ -33,9 +33,12 @@ class NewExample(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     assignment_id: UUID
+    # These limits are agreed with the sender in platform/contracts/approved-examples.md.
+    # The sender (the assessment service) must never accept more than these, or a valid
+    # approval would be refused here. A test checks them against the contract's table.
     student_work: str = Field(min_length=1, max_length=20000)
     grade: str = Field(min_length=1, max_length=100)
-    reasoning: str = Field(min_length=1, max_length=5000)
+    reasoning: str = Field(min_length=1, max_length=10000)
 
     # Which submission in the assessment service this example came from. Optional.
     # When it is given, an example with the same label can only be saved once, so a
