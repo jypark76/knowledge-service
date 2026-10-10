@@ -33,9 +33,17 @@ class NewExample(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     assignment_id: UUID
+    # These limits are agreed with the sender in platform/contracts/approved-examples.md.
+    # The sender (the assessment service) must never accept more than these, or a valid
+    # approval would be refused here. A test checks them against the contract's table.
     student_work: str = Field(min_length=1, max_length=20000)
     grade: str = Field(min_length=1, max_length=100)
-    reasoning: str = Field(min_length=1, max_length=5000)
+    reasoning: str = Field(min_length=1, max_length=10000)
+
+    # Which submission in the assessment service this example came from. Optional.
+    # When it is given, an example with the same label can only be saved once, so a
+    # message delivered twice does not store the same approved essay twice.
+    source_submission_id: UUID | None = None
 
     # Apply the storable-text check to all three text fields.
     _check_text = field_validator("student_work", "grade", "reasoning")(_must_be_storable_text)
@@ -66,27 +74,79 @@ def _vector_text(numbers):
     return "[" + ",".join(str(number) for number in numbers) + "]"
 
 
-# In plain English: saves one new example. It first works out the 384 meaning
-# numbers from the student's work, then adds ONE new row. It never changes or
-# removes existing rows. The values are handed over separately from the SQL
-# (the %s spots), so nothing typed by a user can ever become part of the SQL
-# command itself. Returns the id of the new row.
+# In plain English: raised when a label is already used by a DIFFERENT example. The
+# same label with the same content is a harmless repeat, and is not an error.
+class LabelUsedForDifferentExample(Exception):
+    pass
+
+
+# In plain English: looks up the example that already carries this label, if any.
+def _find_labelled(connection, label):
+    return connection.execute(
+        "SELECT example_id, assignment_id, student_work, grade, reasoning "
+        "FROM examples WHERE source_submission_id = %s",
+        (label,),
+    ).fetchone()
+
+
+# In plain English: the label is already taken. If the saved example is the same as
+# the one now being sent, this is a repeat, so hand back the original's id. If it is
+# different, refuse: one label must never stand for two different examples.
+def _settle_with_existing(existing, example):
+    same = (
+        existing[1] == example.assignment_id
+        and existing[2] == example.student_work
+        and existing[3] == example.grade
+        and existing[4] == example.reasoning
+    )
+    if not same:
+        raise LabelUsedForDifferentExample()
+    return str(existing[0]), False
+
+
+# In plain English: saves one new example. It never changes or removes existing
+# rows. The values are handed over separately from the SQL (the %s spots), so nothing
+# typed by a user can ever become part of the SQL command itself.
+#
+# Returns the example's id and True if it was saved, or the original's id and False if
+# this was a repeat of a labelled example that is already saved.
+#
+# Without a label it simply adds a row, as it always did. With a label:
+#   1. it first checks whether the label is taken, BEFORE the slow step, so a repeat
+#      costs almost nothing;
+#   2. if it is free, it works out the 384 meaning numbers and adds the row, telling
+#      the database "if the label has just been taken by someone else, do nothing";
+#   3. if someone else got there first in that tiny gap, it looks again and settles
+#      the same way as in step 1. Only one row for a label can ever exist, because the
+#      database itself refuses a second one.
 def save_example(example):
+    label = example.source_submission_id
+    if label is not None:
+        with connect() as connection:
+            existing = _find_labelled(connection, label)
+        if existing is not None:
+            return _settle_with_existing(existing, example)
+
     embedding = _vector_text(embed_text(example.student_work))
     with connect() as connection:
         row = connection.execute(
             "INSERT INTO examples "
-            "(assignment_id, student_work, grade, reasoning, embedding) "
-            "VALUES (%s, %s, %s, %s, %s::vector) RETURNING example_id",
+            "(assignment_id, student_work, grade, reasoning, embedding, source_submission_id) "
+            "VALUES (%s, %s, %s, %s, %s::vector, %s) "
+            "ON CONFLICT (source_submission_id) DO NOTHING RETURNING example_id",
             (
                 example.assignment_id,
                 example.student_work,
                 example.grade,
                 example.reasoning,
                 embedding,
+                label,
             ),
         ).fetchone()
-    return str(row[0])
+        if row is not None:
+            return str(row[0]), True
+        existing = _find_labelled(connection, label)
+    return _settle_with_existing(existing, example)
 
 
 # In plain English: lists the saved examples for one assignment, newest first,

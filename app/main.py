@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.db import database_is_ready
 from app.examples import (
+    LabelUsedForDifferentExample,
     NewExample,
     SearchRequest,
     list_examples,
@@ -19,7 +20,7 @@ from app.examples import (
 
 # Create the web application. The title and version show up on the automatic
 # documentation page FastAPI builds at /docs.
-app = FastAPI(title="Knowledge service", version="0.5.1")
+app = FastAPI(title="Knowledge service", version="0.6.1")
 
 
 # In plain English: the kinds of error whose built-in wording is safe, because it
@@ -107,12 +108,24 @@ def ready():
 # request against the NewExample rules and turns bad requests away on its own
 # (error 422) before any of our code runs. If the database has a problem, the
 # caller gets a plain 503 with no details about why.
-@app.post("/examples", status_code=201)
+#
+# An example can carry a source_submission_id, a label saying which submission it came
+# from. A new example answers 201. The same labelled example sent again (a message
+# delivered twice) answers 200 with the original's ID and saves nothing. A label that is
+# already used by a DIFFERENT example answers 409, with fixed wording that does not
+# repeat what was sent.
+@app.post("/examples")
 def create_example(example: NewExample):
     try:
-        return {"example_id": save_example(example)}
+        example_id, created = save_example(example)
+    except LabelUsedForDifferentExample:
+        return JSONResponse(
+            status_code=409,
+            content={"problem": "This source_submission_id is already used for a different example"},
+        )
     except psycopg.Error:
         return JSONResponse(status_code=503, content={"ok": False})
+    return JSONResponse(status_code=201 if created else 200, content={"example_id": example_id})
 
 
 # In plain English: lists the saved examples for one assignment. The

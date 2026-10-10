@@ -57,7 +57,7 @@ and examples saved without a label, have none, and any number of those can exist
 
 | Call | What it does |
 |---|---|
-| `POST /examples` | Save an approved example and compute its embedding |
+| `POST /examples` | Save an approved example and compute its embedding. It may carry an optional `source_submission_id`, a label for the submission it came from. A new example answers 201. The same labelled example sent again (for example a message delivered twice) answers 200 with the original's ID and saves nothing. A label already used by a different example answers 409. Without a label every call saves a new row, as before |
 | `GET /examples?assignment_id=...` | List the examples for one assignment (newest first, up to 100) |
 | `POST /examples/search` | Return the examples most similar in meaning to some text. It searches inside the assignment. If the assignment has no examples at all it returns nothing, unless the caller sets `fallback_to_all` to `true`, which borrows similar examples from every assignment. The flag is off by default, which protects against typos and accidents. It is not a security control, because it travels in the same request and the service has no authentication. Each result carries its `assignment_id` and a `same_assignment` flag, so the caller can tell borrowed examples from the assignment's own |
 | `GET /health` | Report whether the service is alive |
@@ -65,6 +65,17 @@ and examples saved without a label, have none, and any number of those can exist
 
 Bad input is refused with a 422 that names the field and the reason but never
 repeats what the caller sent.
+
+An example's limits are 20,000 characters of student work, 100 of grade and 10,000 of
+reasoning. They are the same limits as in the agreed message format for approved examples
+(`platform/contracts/approved-examples.md`), and a test checks them against that table.
+The sender must never accept more than these.
+
+A repeat of a labelled example is recognised before the slow step (turning the essay
+into 384 numbers), so it costs almost nothing. If two copies arrive at the same instant,
+the database itself lets only one row for a label exist, and the other request looks
+again and answers as a repeat (or 409 if the content differs). Tests cover a planted
+collision and eight identical saves at once.
 
 ## Tests
 

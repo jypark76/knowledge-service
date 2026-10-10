@@ -2,8 +2,11 @@
 # at the door. They need no database, because a bad request is refused before
 # any database work starts. They also check that the refusal message never
 # repeats back what the caller sent.
+from uuid import UUID
+
 from fastapi.testclient import TestClient
 
+from app.examples import NewExample
 from app.main import app
 
 client = TestClient(app)
@@ -202,3 +205,55 @@ def test_search_rejects_a_fallback_flag_that_is_not_true_or_false():
         data = good_search()
         data["fallback_to_all"] = bad
         assert_refused(client.post("/examples/search", json=data), "fallback_to_all")
+
+
+# In plain English: the label saying which submission an example came from is
+# optional, and when it is given it is read as a real UUID. This checks the rules
+# directly, so it needs no database.
+def test_the_source_label_is_optional_and_read_as_a_uuid():
+    assert NewExample(**good_example()).source_submission_id is None
+    labelled = NewExample(**good_example(), source_submission_id=GOOD_ID)
+    assert labelled.source_submission_id == UUID(GOOD_ID)
+
+
+# In plain English: a label that is not a UUID is refused with fixed wording, and
+# the reply never repeats what was sent. A number is refused the same way.
+def test_save_rejects_a_bad_source_label_without_repeating_it():
+    for bad in ("SECRET-MARKER-12345", 12345):
+        data = good_example()
+        data["source_submission_id"] = bad
+        response = client.post("/examples", json=data)
+        assert_refused(response, "source_submission_id")
+        assert "SECRET-MARKER" not in response.text
+
+
+# In plain English: the limits this service accepts for an approved example, as
+# agreed with the sender in platform/contracts/approved-examples.md. The sender (the
+# assessment service) must never accept more than these, or a valid approval would be
+# refused here and end up in the dead-letter topic. If you change a limit, change the
+# contract table and the other service in the same piece of work.
+CONTRACT_LIMITS = {"student_work": 20_000, "grade": 100, "reasoning": 10_000}
+
+
+# In plain English: this service's limits must equal the contract's table exactly. A
+# limit that drifts, up or down, fails here.
+def test_the_limits_match_the_contract():
+    for name, expected in CONTRACT_LIMITS.items():
+        rules = NewExample.model_fields[name].metadata
+        assert [rule.max_length for rule in rules if hasattr(rule, "max_length")] == [expected], name
+
+
+# In plain English: reasoning may be exactly 10,000 characters and not one more. The
+# sender allows up to 10,000, so the reader must too. The longest allowed value is the
+# control: it is accepted, so the refusal of 10,001 can only come from the limit. The
+# refusal names the field and never repeats the text.
+def test_reasoning_may_be_ten_thousand_characters_and_no_more():
+    longest = NewExample(**{**good_example(), "reasoning": "r" * 10_000})
+    assert len(longest.reasoning) == 10_000
+
+    data = good_example()
+    data["reasoning"] = "SECRET-MARKER-" + "x" * 9_987
+    assert len(data["reasoning"]) == 10_001
+    response = client.post("/examples", json=data)
+    assert_refused(response, "reasoning")
+    assert "SECRET-MARKER" not in response.text
