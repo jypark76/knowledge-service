@@ -13,3 +13,5 @@ data:
   DB_NAME: knowledge
   # The limited login that can only read and add examples.
   DB_USER: knowledge_app
+  # Where Kafka lives inside the cluster. Only the reader uses this.
+  KAFKA_BOOTSTRAP: kafka.kafka.svc.cluster.local:9092

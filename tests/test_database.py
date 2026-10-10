@@ -28,19 +28,10 @@ from app.main import app
 client = TestClient(app)
 
 
-# In plain English: runs before every test in this file. With no database
-# settings at all, the tests quietly skip, so a normal run on your laptop still
-# works. In the pipeline REQUIRE_DB=1 is set, and then a missing database is a
-# failure, because a test that silently skips proves nothing. If the settings
-# point at any database other than "knowledge_test", it refuses to run.
-@pytest.fixture(autouse=True)
-def require_test_database():
-    if not os.environ.get("DB_HOST"):
-        if os.environ.get("REQUIRE_DB") == "1":
-            pytest.fail("REQUIRE_DB is set but no database settings were given")
-        pytest.skip("no test database configured")
-    if os.environ.get("DB_NAME") != "knowledge_test":
-        pytest.fail("refusing to run: DB_NAME must be 'knowledge_test', never a real database")
+# In plain English: every test in this file first passes the shared database guard
+# in conftest.py (skip with no database, fail if REQUIRE_DB is set and none is given,
+# refuse any database not named knowledge_test).
+pytestmark = pytest.mark.usefixtures("require_test_database")
 
 
 # In plain English: saves one example through the real web address and returns

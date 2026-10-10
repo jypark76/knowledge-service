@@ -29,7 +29,7 @@ CLUSTER_WIDE = {"Namespace"}
 WORKLOADS = {"Deployment", "Job"}
 
 # The pods that must run locked down: a normal user, no extra privileges.
-LOCKED_DOWN = {"knowledge-service", "knowledge-migrate"}
+LOCKED_DOWN = {"knowledge-service", "knowledge-consumer", "knowledge-migrate"}
 
 # Things the pods point at that are NOT in the rendered files on purpose:
 # "knowledge-db-init" is made by deploy.sh from db/init.sql, "knowledge-db-changelog"
@@ -185,6 +185,7 @@ def real_docs():
 def test_real_overlay_breaks_no_rules(real_docs):
     kinds = {(doc["kind"], doc["metadata"]["name"]) for doc in real_docs}
     assert ("Deployment", "knowledge-service") in kinds
+    assert ("Deployment", "knowledge-consumer") in kinds
     assert ("Deployment", "knowledge-db") in kinds
     assert ("NetworkPolicy", "knowledge-db-allow-service-only") in kinds
     assert ("Job", "knowledge-migrate") in kinds
@@ -225,6 +226,7 @@ def test_the_database_door_lets_the_migration_job_in(real_docs):
     ]
     assert "knowledge-migrate" in allowed
     assert "knowledge-service" in allowed
+    assert "knowledge-consumer" in allowed
 
 
 # In plain English: the deploy script must hand the change files to the cluster and
@@ -239,7 +241,7 @@ def test_deploy_script_hands_over_the_changes_and_clears_the_old_job():
 # done. Otherwise a new service version could start on the old table, and if the
 # migration failed the new version would already be live. The Deployment carries a
 # label so the script can pick it out. The script applies everything else first, waits
-# for the migration, and only then applies the service. Nothing else may carry the
+# for the migration, and only then applies the service and the reader. Nothing else may carry the
 # label, or it too would wait.
 def test_the_service_rolls_out_only_after_the_migration(real_docs):
     labelled = [
@@ -247,7 +249,7 @@ def test_the_service_rolls_out_only_after_the_migration(real_docs):
         for doc in real_docs
         if doc["metadata"].get("labels", {}).get("deploy-phase") == "service"
     ]
-    assert labelled == ["knowledge-service"]
+    assert sorted(labelled) == ["knowledge-consumer", "knowledge-service"]
     script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
     everything_else_first = script.index("deploy-phase!=service")
     wait_for_the_migration = script.index("\nwait_for_migration\n")
@@ -476,3 +478,23 @@ def test_catches_a_password_written_in_the_files():
 def test_failed_migration_pods_are_kept_so_their_log_can_be_read(real_docs):
     job = next(doc for doc in real_docs if doc["kind"] == "Job" and doc["metadata"]["name"] == "knowledge-migrate")
     assert job["spec"]["template"]["spec"]["restartPolicy"] == "Never"
+
+
+# In plain English: the reader is its own Deployment from the SAME image as the web
+# service, started with a different command. It listens on no port, takes the database
+# password from the Secret (never from a written value), and gets the Kafka address
+# from the shared settings.
+def test_the_reader_runs_the_reader_code_from_the_same_image(real_docs):
+    service = next(d for d in real_docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "knowledge-service")
+    reader = next(d for d in real_docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "knowledge-consumer")
+    container = containers_of(reader)[0]
+    assert container["image"] == containers_of(service)[0]["image"]
+    assert container["command"] == ["python", "-m", "app.consumer"]
+    assert "ports" not in container
+    assert reader["spec"]["template"]["metadata"]["labels"]["app"] == "knowledge-consumer"
+    password = {item["name"]: item for item in container["env"]}["DB_PASSWORD"]
+    assert "value" not in password
+    assert password["valueFrom"]["secretKeyRef"] == {"name": "knowledge-db", "key": "app-password"}
+    settings = next(d for d in real_docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "knowledge-service-config")
+    assert settings["data"]["KAFKA_BOOTSTRAP"] == "kafka.kafka.svc.cluster.local:9092"
+    assert container["envFrom"] == [{"configMapRef": {"name": "knowledge-service-config"}}]

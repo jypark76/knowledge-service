@@ -1,7 +1,7 @@
 # In plain English: a door rule for the database pod. By default every pod in
 # the cluster can open a connection to the database. This rule changes that: once
-# it is in place, ONLY pods labelled "app: knowledge-service" (the service) or
-# "app: knowledge-migrate" (the one-time job that applies database changes) may
+# it is in place, ONLY pods labelled "app: knowledge-service" (the service),
+# "app: knowledge-consumer" (the Kafka reader) or "app: knowledge-migrate" (the one-time job that applies database changes) may
 # connect, and only to the database's own port (5432). Every other pod is turned
 # away, even one in the same namespace.
 #
@@ -36,11 +36,14 @@ spec:
     - Ingress
   ingress:
     - from:
-        # The only pods allowed in: the knowledge service, and the one-time job that
+        # The only pods allowed in: the knowledge service, the Kafka reader, and the one-time job that
         # applies database changes (it needs the database to do its work).
         - podSelector:
             matchLabels:
               app: knowledge-service
+        - podSelector:
+            matchLabels:
+              app: knowledge-consumer
         - podSelector:
             matchLabels:
               app: knowledge-migrate

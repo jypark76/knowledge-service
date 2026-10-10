@@ -20,7 +20,7 @@ from app.examples import (
 
 # Create the web application. The title and version show up on the automatic
 # documentation page FastAPI builds at /docs.
-app = FastAPI(title="Knowledge service", version="0.6.1")
+app = FastAPI(title="Knowledge service", version="0.7.0")
 
 
 # In plain English: the kinds of error whose built-in wording is safe, because it
