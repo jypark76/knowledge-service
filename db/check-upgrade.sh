@@ -62,7 +62,7 @@ docker run -d --name "$name" \
 
 # Wait until the first-start script has finished AND the real server answers.
 ready=""
-for attempt in $(seq 1 60); do
+for _ in $(seq 1 60); do
   if docker logs "$name" 2>&1 | grep -q "init process complete" \
     && docker exec "$name" pg_isready -h 127.0.0.1 -U postgres -d "$database" > /dev/null; then
     ready="yes"
