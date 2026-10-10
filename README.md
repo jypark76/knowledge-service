@@ -26,6 +26,33 @@ an assignment ID (a plain reference to another service), the student work, the
 grade, the reasoning, the embedding and a timestamp. It stores no student
 names.
 
+## Changing the database
+
+`db/init.sql` builds the first version of the table, once, on an empty database. Every
+change after that is a numbered file in [`db/changelog`](db/changelog), applied by
+Liquibase (a free tool that applies database changes in order and remembers which
+ones it has applied). The root list [`changelog-root.yaml`](db/changelog/changelog-root.yaml)
+names the files in order. Never edit a change that has already been applied. Add the
+next numbered file and list it. A test checks that every file is on the list.
+
+On every deploy, a one-time job (`k8s/base/migrate-job.yaml`) runs Liquibase as the
+database admin, with the password from the Kubernetes Secret, and applies only the
+changes that are missing. If they are all applied it does nothing. The service's own
+login still cannot change tables. `deploy.sh` deploys in two steps. First everything
+except the service, including the migration job. Then it waits for the job, and only
+when the database changes are done does it roll out the service, so a new version never
+starts on an old table. If a change fails, the script stops within a few minutes, prints
+the job's log from every attempt, and leaves the running service untouched. A failed
+retry of the job stays as its own pod so the log can still be read.
+
+`bash db/check-upgrade.sh` proves an upgrade on a throwaway database that already
+holds an example: the example survives, the new rule works, and a second run changes
+nothing. The pipeline runs it on every pull request.
+
+Change 0001 adds `source_submission_id`: a label saying which submission an example
+came from, with a rule that two examples cannot share one. Examples saved before it,
+and examples saved without a label, have none, and any number of those can exist.
+
 ## API
 
 | Call | What it does |
@@ -111,7 +138,7 @@ the first call is slower. If it is ever preloaded at startup, add a
 `startupProbe` to the Deployment so a slow start is not mistaken for a crash.
 
 The database pod has a NetworkPolicy (`k8s/overlays/local/networkpolicy.yaml`) that
-allows only the service pod to connect. It is written but not verified: Docker
+allows only the service pod and the one-time migration job to connect. It is written but not verified: Docker
 Desktop's built-in cluster does not enforce NetworkPolicy, so a wrong pod still gets
 through there. It has to be tested on a cluster that enforces policies.
 

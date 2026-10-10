@@ -107,8 +107,31 @@ jobs:
 
       - run: pip install -r requirements-dev.txt
 
+      # The upgrade proof. It starts its OWN throwaway database built the old way,
+      # saves an example in it, applies the database changes with Liquibase, and
+      # checks the old example survived, the new rule works, and a second run of
+      # Liquibase changes nothing. It does not touch the test database above.
+      - name: Prove the database upgrade works on a database that already has data
+        run: bash db/check-upgrade.sh
+
+      # Bring the test database up to date the same way the cluster does: with
+      # Liquibase, as the admin. The tests then run against the upgraded database.
+      # --network container:test-db makes "localhost" mean the test database.
+      - name: Apply the database changes to the test database
+        run: |
+          docker run --rm --network container:test-db \
+            -v "$PWD/db/changelog:/liquibase/changelog:ro" \
+            -e LIQUIBASE_COMMAND_URL=jdbc:postgresql://localhost:5432/knowledge_test \
+            -e LIQUIBASE_COMMAND_USERNAME=postgres \
+            -e LIQUIBASE_COMMAND_PASSWORD="$ADMIN_PASSWORD" \
+            liquibase/liquibase:4.31.1 \
+            --search-path=/liquibase/changelog --changelog-file=changelog-root.yaml update
+
       # REQUIRE_DB=1 turns "skipped" into "failed", so these tests cannot pass by
-      # silently doing nothing.
+      # silently doing nothing. This runs EVERY test file, not a list of database
+      # files: a list goes stale when a file is added, and the first job (no
+      # database) quietly skips database tests. The Kubernetes file checks have
+      # their own job below.
       - name: Run the database tests
         env:
           DB_HOST: localhost
@@ -117,7 +140,7 @@ jobs:
           DB_USER: knowledge_app
           DB_PASSWORD: ${{ env.APP_PASSWORD }}
           REQUIRE_DB: "1"
-        run: pytest -v tests/test_database.py
+        run: pytest -v --ignore=tests/test_k8s_manifests.py
 
       # If anything failed, show the database's own log to help find out why.
       - name: Show the database log
@@ -125,7 +148,7 @@ jobs:
         run: docker logs test-db
 
   # In plain English: the third job. It checks the Kubernetes files before they
-  # ever reach a cluster: the two shell scripts are checked with shellcheck, and
+  # ever reach a cluster: the three shell scripts are checked with shellcheck, and
   # the final laptop files are built and checked against our rules (right
   # namespace, no Secret, fixed image tags, locked-down service pod and so on).
   # REQUIRE_KUBECTL=1 makes a missing kubectl a failure and not a quiet skip.
@@ -143,7 +166,7 @@ jobs:
       - run: pip install -r requirements-dev.txt
 
       - name: Check the shell scripts
-        run: shellcheck k8s/deploy.sh k8s/overlays/local/set-app-password.sh
+        run: shellcheck k8s/deploy.sh k8s/overlays/local/set-app-password.sh db/check-upgrade.sh
 
       - name: Check the rendered Kubernetes files
         env:
