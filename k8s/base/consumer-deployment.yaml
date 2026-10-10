@@ -1,0 +1,55 @@
+# In plain English: the Kafka reader. It runs the SAME image as the knowledge service but
+# starts a different program (python -m app.consumer) that takes approved examples off the
+# "approved-examples" topic and saves them. It is its own Deployment so it can be
+# scaled on its own later (more readers when the queue grows). It listens on no port, so it
+# has no probes and no Service; if it crashes, Kubernetes restarts it and the message that
+# was in hand is read again (it is only marked done after it is dealt with).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: knowledge-consumer
+  namespace: knowledge
+  labels:
+    # Rolled out AFTER the database changes, like the service, so a new reader never
+    # starts on an old table.
+    deploy-phase: service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: knowledge-consumer
+  template:
+    metadata:
+      labels:
+        app: knowledge-consumer
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: knowledge-consumer
+          # Same image name as the service; each overlay adds the version tag.
+          image: knowledge-service
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "app.consumer"]
+          envFrom:
+            - configMapRef:
+                name: knowledge-service-config
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: knowledge-db
+                  key: app-password
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          # The embedding model lives in memory, so allow room for it.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 1Gi

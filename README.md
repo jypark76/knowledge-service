@@ -77,6 +77,27 @@ the database itself lets only one row for a label exist, and the other request l
 again and answers as a repeat (or 409 if the content differs). Tests cover a planted
 collision and eight identical saves at once.
 
+## The Kafka reader
+
+Approved examples also arrive on the Kafka topic `approved-examples`. A second program,
+[`app/consumer.py`](app/consumer.py), reads them. It runs as its own Deployment
+(`knowledge-consumer`) from the same image, started with `python -m app.consumer`, and has no
+web port. The message format is the shared contract in `platform/contracts/approved-examples.md`.
+
+- A good new message is saved with the same routine as `POST /examples`. A repeat is recognised
+  by its `source_submission_id` and saves nothing.
+- A message is marked done only AFTER it has been dealt with, so a crash never loses one.
+- A message that can never succeed (not JSON, unknown version, a broken rule, key not equal to the
+  label, label already used by a different example) is copied to `approved-examples.dead-letter`
+  with the reason in an `error` header, and then marked done so it cannot block its lane. A person
+  has to look at the dead-letter topic; nothing reads it automatically.
+- Temporary trouble (database or Kafka down) commits nothing; the reader stops and Kubernetes
+  restarts it, and the message is read again.
+- No student text is written to the logs.
+
+Limits: the tests use a pretend Kafka (the real one is proven on the cluster by hand); there is one
+reader; connections on the laptop are plain, with no login.
+
 ## Tests
 
 ```
