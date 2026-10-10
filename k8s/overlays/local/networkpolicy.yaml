@@ -1,8 +1,9 @@
 # In plain English: a door rule for the database pod. By default every pod in
 # the cluster can open a connection to the database. This rule changes that: once
-# it is in place, ONLY pods labelled "app: knowledge-service" may connect, and
-# only to the database's own port (5432). Every other pod is turned away, even
-# one in the same namespace.
+# it is in place, ONLY pods labelled "app: knowledge-service" (the service) or
+# "app: knowledge-migrate" (the one-time job that applies database changes) may
+# connect, and only to the database's own port (5432). Every other pod is turned
+# away, even one in the same namespace.
 #
 # It lives in the "local" overlay because the database pod itself is laptop only.
 # On AWS the database is RDS, and who may reach it is set by an AWS security
@@ -35,10 +36,14 @@ spec:
     - Ingress
   ingress:
     - from:
-        # The only pods allowed in: the knowledge service.
+        # The only pods allowed in: the knowledge service, and the one-time job that
+        # applies database changes (it needs the database to do its work).
         - podSelector:
             matchLabels:
               app: knowledge-service
+        - podSelector:
+            matchLabels:
+              app: knowledge-migrate
       ports:
         - protocol: TCP
           port: 5432

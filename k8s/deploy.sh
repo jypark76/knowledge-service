@@ -80,5 +80,24 @@ if [ "$overlay" = "local" ]; then
     --dry-run=client -o yaml | kubectl apply -f -
 fi
 
+# Hand the database change files (db/changelog) to the cluster. They contain no
+# secrets. The one-time migration job reads them from this ConfigMap. This happens
+# on every environment, because every database needs its changes applied.
+kubectl create configmap knowledge-db-changelog -n knowledge \
+  --from-file="$here/../db/changelog" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# A job cannot be changed after it is made, so remove the old migration job first.
+# It is safe to run again: it only applies the changes that are missing.
+kubectl delete job knowledge-migrate -n knowledge --ignore-not-found
+
 # Deploy everything for this environment.
 kubectl apply -k "$here/overlays/$overlay"
+
+# Wait for the database changes to finish. If they fail, show why and stop, so a
+# broken migration is noticed now and not later.
+if ! kubectl wait --for=condition=complete job/knowledge-migrate -n knowledge --timeout=300s; then
+  echo "The database migration did not finish. Its log:" >&2
+  kubectl logs job/knowledge-migrate -n knowledge >&2 || true
+  exit 1
+fi

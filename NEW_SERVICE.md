@@ -116,6 +116,13 @@ before the real features.
   file missing from a list runs nowhere. This happened on the assessment service: five
   test files never ran in the pipeline until a review caught it. After adding a test
   file, open the job log and check the test count went up.
+- Once a database holds real data, every change to it is a numbered file in
+  `db/changelog`, applied by the Liquibase job that `deploy.sh` runs. Never run SQL by
+  hand against a database that matters. `db/init.sql` stays as the first version of
+  the table. Prove each change with `db/check-upgrade.sh`, which upgrades a database
+  that already holds data and checks the data survives and a second run changes nothing.
+  The migration job must follow the same rules as the service: a pinned image, a
+  normal user, a memory limit, and its password from the Secret.
 - Run every new pipeline check on your own computer before the first pipeline run. In
   Git Bash on Windows put `MSYS_NO_PATHCONV=1` in front of `docker` commands that
   contain paths.
