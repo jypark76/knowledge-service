@@ -96,6 +96,81 @@ before the real features.
 8. Harden: the NetworkPolicy (it can only be proven on a cluster that enforces
    policies, such as EKS with network policy on), and a second review pass.
 
+## Step 5: connecting the service to others through Kafka
+
+Do this only after the service works on its own. These are the rules the knowledge and
+assessment services follow. The `platform` repo holds Kafka itself, the topics and the
+written message contracts.
+
+**Write the contract first.** Before any code, add `contracts/<topic>.md` in the `platform`
+repo: the topic, the key, the exact fields, the limits at both ends, what the sender must
+do, what the reader does and every reason code the reader can put on a dead-letter message.
+No extra fields; a change means a new `schema_version`. Add the topic and its dead-letter
+topic to the topic job. Platform tests fail if a topic has no contract or a reason code is
+not written down. Each service adds a test that its own limits never exceed the other
+end's, and, when a limit comes from a route constant, a test that the message limit is
+that same constant and not a copy of the number.
+
+**A program that sends (the outbox idea).**
+
+- The request that causes the message (an approval, a new submission) only saves a row. It
+  never talks to Kafka, so a Kafka outage cannot stop the service.
+- A separate program, started with its own command from the same image, loops: it asks
+  the database what is waiting, publishes it, and adds a row to an append-only "sent"
+  table (a numbered Liquibase change) ONLY after Kafka's delivery callback confirms it.
+  `flush()` returning zero is not proof. A refusal arrives only through the callback.
+- Anything not confirmed stays waiting and is sent again. If a message can be lost after
+  it was delivered (the receiver sets it aside, or the topic's retention ends), resend after
+  a long wait and cap the number of sends, then leave it for a person.
+- Build the message with the same rules as the contract and skip a row that cannot be
+  built, once, by its ID, so a pile of bad rows cannot hold up the good ones. Never log
+  student text.
+- Use `acks=all` and the idempotent producer setting. Delivery is at-least-once, so say
+  that, never exactly-once.
+
+**A program that reads.**
+
+- Commit an offset only AFTER the message has been dealt with. A good message is saved. A
+  repeat changes nothing. A normal race (the other side moved on) is dropped and logged by
+  ID only. A message that can never succeed (not JSON, unknown version, a broken rule, key
+  not equal to the label, a save the database refuses for that message alone) is copied to
+  the dead-letter topic with a reason in an `error` header, the copy is confirmed
+  delivered, and only then is the original committed. Temporary trouble (database or Kafka
+  down) commits nothing and stops the program so it is tried again.
+- Make repeats harmless where the data lands: a unique label with `ON CONFLICT DO NOTHING`
+  and a re-read, or an operation that already answers a repeat with the saved result. Prove
+  it with a planted-collision test and a threaded race test.
+- Pin `confluent-kafka` and check the wheel installs in the slim image.
+
+**Deploying them.** Each program is its own Deployment from the same image with
+`command: ["python", "-m", "app.<name>"]`, no port, no probes and no Service. Give it the
+`deploy-phase: service` label (so it rolls out after the migration), add it to the
+checker's locked-down list, add its pod label to the database door rule, put
+`KAFKA_BOOTSTRAP` in the settings ConfigMap, and keep to one copy until it needs more.
+
+**Testing them.**
+
+- Use a pretend consumer and producer. The pretend consumer must fail the test if the
+  program polls after its messages ran out, or a broken loop hangs the test for ever. The
+  pretend producer must report a refusal through the callback while `flush()` still says
+  zero, as real Kafka does.
+- Test the real entry point too: run `main()` with a pretend Kafka library and stop it the
+  way Kubernetes does. A deployed pod once crashed because only the inner function had been
+  tested with the arguments that `main()` passed.
+- Break each rule on purpose, one at a time (skip the delivery check, skip the key check,
+  send the wrong rows, commit too early), and confirm a test fails. Keep the script out of
+  the repo or in the scratchpad.
+- Prove it live with Kafka's own console producer and consumer: a good message, the same
+  one again, bad JSON, an unknown version, a clash. Stop the program, post a message,
+  start it again and check nothing was lost and the lag is zero. Stop Kafka, do the
+  normal action, start Kafka, and check the message arrives.
+
+**A key on the routes.** A service that other services call should require a shared bearer
+key from a Kubernetes Secret on every route except `/health` and `/ready`: the same fixed
+401 for every failure, 503 and never open when no key is configured, keys compared in
+constant time, several keys allowed so one can be replaced without downtime. Find the
+routes by asking the app in the test so a new route cannot be forgotten.
+
 ## The rules that keep the checks honest
 
 - The repo alone must rebuild everything. Anything done by hand and not written in the
@@ -126,6 +201,9 @@ before the real features.
   contain paths.
 - Read the namespace of every object in the deploy preview, not just the names.
 - Comments claim only what the code does. If a fix has a ceiling, say where it is.
+- Review comments arrive after the pull request is open. Fix them on the same branch,
+  test first, deploy the new version when code changed, and say the pull request is updated.
+  A fix that is merged before its last commit is pushed needs a new branch.
 
 ## Before you open a pull request
 
