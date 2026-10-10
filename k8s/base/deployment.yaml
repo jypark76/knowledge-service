@@ -7,6 +7,10 @@ kind: Deployment
 metadata:
   name: knowledge-service
   namespace: knowledge
+  labels:
+    # This label lets the deploy script roll the service out AFTER the database
+    # changes are done. It is on this Deployment only.
+    deploy-phase: service
 spec:
   replicas: 1
   selector:

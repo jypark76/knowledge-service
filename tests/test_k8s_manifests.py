@@ -227,14 +227,50 @@ def test_the_database_door_lets_the_migration_job_in(real_docs):
     assert "knowledge-service" in allowed
 
 
-# In plain English: the deploy script must hand the change files to the cluster,
-# clear out the old migration job (a job cannot be changed after it is made), and
-# wait for the new one to finish, so a failed migration stops the deploy loudly.
-def test_deploy_script_runs_the_migration_and_waits_for_it():
+# In plain English: the deploy script must hand the change files to the cluster and
+# clear out the old migration job first (a job cannot be changed after it is made).
+def test_deploy_script_hands_over_the_changes_and_clears_the_old_job():
     script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
     assert "knowledge-db-changelog" in script
     assert "kubectl delete job knowledge-migrate" in script
-    assert "kubectl wait" in script and "job/knowledge-migrate" in script
+
+
+# In plain English: the service must roll out only AFTER the database changes are
+# done. Otherwise a new service version could start on the old table, and if the
+# migration failed the new version would already be live. The Deployment carries a
+# label so the script can pick it out. The script applies everything else first, waits
+# for the migration, and only then applies the service. Nothing else may carry the
+# label, or it too would wait.
+def test_the_service_rolls_out_only_after_the_migration(real_docs):
+    labelled = [
+        doc["metadata"]["name"]
+        for doc in real_docs
+        if doc["metadata"].get("labels", {}).get("deploy-phase") == "service"
+    ]
+    assert labelled == ["knowledge-service"]
+    script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    everything_else_first = script.index("deploy-phase!=service")
+    wait_for_the_migration = script.index("\nwait_for_migration\n")
+    the_service_last = script.index("deploy-phase=service")
+    assert everything_else_first < wait_for_the_migration < the_service_last
+
+
+# In plain English: a failed migration must be reported as soon as it fails, with its
+# log. "kubectl wait" cannot do that: it only stops early on success, so a failure shows
+# up after the whole timeout. The script looks at the job's own state instead.
+def test_a_failed_migration_is_reported_without_waiting_for_a_timeout():
+    script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    assert "kubectl wait" not in script
+    assert "Failed" in script
+    assert "kubectl logs -l job-name=knowledge-migrate" in script
+
+
+# In plain English: the job's own retries must run out before the script stops
+# waiting, or the script would give up on a job that is still trying. Four retries
+# wait about 2.5 minutes in total, well inside the script's 10 minutes.
+def test_the_migration_job_gives_up_before_the_deploy_script_does(real_docs):
+    job = next(doc for doc in real_docs if doc["kind"] == "Job" and doc["metadata"]["name"] == "knowledge-migrate")
+    assert job["spec"]["backoffLimit"] <= 4
 
 
 # ---------------------------------------------------------------------------
@@ -431,3 +467,12 @@ def test_catches_a_password_written_in_the_files():
     containers_of(job_of(docs))[0]["env"] = [{"name": "LIQUIBASE_COMMAND_PASSWORD", "value": "hunter2"}]
     problems = find_problems(docs)
     assert any("PASSWORD" in problem and "Secret" in problem for problem in problems)
+
+
+# In plain English: every retry of the migration job must be a NEW pod that stays
+# after it fails. With "OnFailure" Kubernetes restarts the container inside one pod
+# and deletes that pod when the retries run out, and the log goes with it. We found
+# that out in a real failure drill: the script could not show why the migration failed.
+def test_failed_migration_pods_are_kept_so_their_log_can_be_read(real_docs):
+    job = next(doc for doc in real_docs if doc["kind"] == "Job" and doc["metadata"]["name"] == "knowledge-migrate")
+    assert job["spec"]["template"]["spec"]["restartPolicy"] == "Never"

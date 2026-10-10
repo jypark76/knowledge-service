@@ -91,13 +91,39 @@ kubectl create configmap knowledge-db-changelog -n knowledge \
 # It is safe to run again: it only applies the changes that are missing.
 kubectl delete job knowledge-migrate -n knowledge --ignore-not-found
 
-# Deploy everything for this environment.
-kubectl apply -k "$here/overlays/$overlay"
-
-# Wait for the database changes to finish. If they fail, show why and stop, so a
-# broken migration is noticed now and not later.
-if ! kubectl wait --for=condition=complete job/knowledge-migrate -n knowledge --timeout=300s; then
-  echo "The database migration did not finish. Its log:" >&2
-  kubectl logs job/knowledge-migrate -n knowledge >&2 || true
+# Waits for the database changes to finish, and stops the whole deploy loudly if they
+# fail. It looks at the job's own state every few seconds, so a failure is reported
+# the moment it happens, with the job's log. (Kubernetes' ready-made wait command
+# cannot do that: it only stops early on success, so a failure shows up after the
+# full timeout.)
+wait_for_migration() {
+  local deadline=$((SECONDS + 600))
+  local succeeded failed
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    succeeded="$(kubectl get job knowledge-migrate -n knowledge -o jsonpath='{.status.succeeded}')"
+    failed="$(kubectl get job knowledge-migrate -n knowledge -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}')"
+    if [ "$succeeded" = "1" ]; then
+      echo "The database changes are applied."
+      return 0
+    fi
+    if [ "$failed" = "True" ]; then
+      echo "The database migration FAILED. Its log (every attempt):" >&2
+      kubectl logs -l job-name=knowledge-migrate -n knowledge --tail=40 --prefix >&2
+      exit 1
+    fi
+    sleep 3
+  done
+  echo "The database migration did not finish within 10 minutes. Its log so far:" >&2
+  kubectl logs -l job-name=knowledge-migrate -n knowledge --tail=40 --prefix >&2
   exit 1
-fi
+}
+
+# Deploy in two steps, so the service never starts on an old table. First everything
+# except the service: the settings, the database (on a laptop) and the migration job.
+kubectl apply -k "$here/overlays/$overlay" -l 'deploy-phase!=service'
+
+# Only when the database changes are done does the service itself roll out. If they
+# failed, the script has already stopped, and the running service is left untouched.
+wait_for_migration
+
+kubectl apply -k "$here/overlays/$overlay" -l 'deploy-phase=service'

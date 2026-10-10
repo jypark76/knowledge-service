@@ -38,8 +38,12 @@ next numbered file and list it. A test checks that every file is on the list.
 On every deploy, a one-time job (`k8s/base/migrate-job.yaml`) runs Liquibase as the
 database admin, with the password from the Kubernetes Secret, and applies only the
 changes that are missing. If they are all applied it does nothing. The service's own
-login still cannot change tables. `deploy.sh` waits for the job and stops with the
-job's log if it fails.
+login still cannot change tables. `deploy.sh` deploys in two steps. First everything
+except the service, including the migration job. Then it waits for the job, and only
+when the database changes are done does it roll out the service, so a new version never
+starts on an old table. If a change fails, the script stops within a few minutes, prints
+the job's log from every attempt, and leaves the running service untouched. A failed
+retry of the job stays as its own pod so the log can still be read.
 
 `bash db/check-upgrade.sh` proves an upgrade on a throwaway database that already
 holds an example: the example survives, the new rule works, and a second run changes
