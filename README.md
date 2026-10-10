@@ -88,7 +88,7 @@ web port. The message format is the shared contract in `platform/contracts/appro
   by its `source_submission_id` and saves nothing.
 - A message is marked done only AFTER it has been dealt with, so a crash never loses one.
 - A message that can never succeed (not JSON, unknown version, a broken rule, key not equal to the
-  label, label already used by a different example) is copied to `approved-examples.dead-letter`
+  label, label already used by a different example, or a save the database refuses for that message alone) is copied to `approved-examples.dead-letter`
   with the reason in an `error` header, and then marked done so it cannot block its lane. A person
   has to look at the dead-letter topic; nothing reads it automatically.
 - Temporary trouble (database or Kafka down) commits nothing; the reader stops and Kubernetes

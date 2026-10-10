@@ -114,6 +114,17 @@ def test_a_label_used_for_a_different_example_is_dead_lettered():
     assert handle_message(*keyed(good_value()), save=save) == ("dead_letter", "label_conflict")
 
 
+# A save the database refuses for this message alone (data it cannot store, a rule it
+# enforces) would fail the same way every time, so it is dead-lettered instead of
+# blocking its lane forever.
+@pytest.mark.parametrize("error", [psycopg.DataError("bad data"), psycopg.IntegrityError("rule")])
+def test_a_save_the_database_refuses_for_this_message_is_dead_lettered(error):
+    def save(example):
+        raise error
+
+    assert handle_message(*keyed(good_value()), save=save) == ("dead_letter", "save_rejected")
+
+
 def test_a_database_failure_is_not_swallowed():
     def save(example):
         raise psycopg.OperationalError("down")
@@ -170,15 +181,23 @@ class FakeConsumer:
 
 
 class FakeProducer:
-    def __init__(self, log, left_over=0):
+    # "rejected" pretends the broker refused the copy: the delivery callback gets an
+    # error, yet flush() still reports nothing left in the queue, as real Kafka does.
+    def __init__(self, log, left_over=0, rejected=False):
         self.log = log
         self.left_over = left_over
+        self.rejected = rejected
+        self.callbacks = []
 
-    def produce(self, topic, key=None, value=None, headers=None):
+    def produce(self, topic, key=None, value=None, headers=None, on_delivery=None):
         self.log.append(("produce", topic, key, value, headers))
+        self.callbacks.append(on_delivery)
 
     def flush(self, timeout=None):
         self.log.append(("flush",))
+        for callback in self.callbacks:
+            if callback is not None:
+                callback("broker said no" if self.rejected else None, None)
         return self.left_over
 
 
@@ -242,6 +261,16 @@ def test_a_dead_letter_that_is_not_delivered_is_not_committed():
     fake = FakeConsumer([FakeMessage(b"k", b"{oops", 5)], log)
     with pytest.raises(RuntimeError):
         run(fake, FakeProducer(log, left_over=1), save=never_save, should_stop=lambda: False)
+    assert ("commit", 5) not in log
+
+
+# flush() only says how many copies are still queued. A refused copy is reported through the
+# delivery callback, so a refusal must stop the reader before the commit.
+def test_a_dead_letter_the_broker_refused_is_not_committed():
+    log = []
+    fake = FakeConsumer([FakeMessage(b"k", b"{oops", 5)], log)
+    with pytest.raises(RuntimeError):
+        run(fake, FakeProducer(log, rejected=True), save=never_save, should_stop=lambda: False)
     assert ("commit", 5) not in log
 
 

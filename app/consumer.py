@@ -7,7 +7,8 @@
 #   saved       a good new example was saved.
 #   repeat      a good example that was already saved; nothing is saved twice.
 #   dead_letter a message that can never succeed (not JSON, unknown version, a broken
-#               rule, key not equal to the label, label used by a different example). It
+#               rule, key not equal to the label, label used by a different example, or
+#               a save the database refuses for this message alone). It
 #               is copied to the topic "approved-examples.dead-letter" with the reason
 #               in a header, so it cannot block its lane, and a person can look at it.
 # Temporary trouble (database down, Kafka down) is NOT dealt with: nothing is committed,
@@ -21,6 +22,7 @@ import signal
 import uuid
 from typing import Literal
 
+import psycopg
 from pydantic import ValidationError
 
 from app.examples import LabelUsedForDifferentExample, NewExample, save_example
@@ -72,6 +74,11 @@ def handle_message(key, value, save=save_example):
         _, created = save(message)
     except LabelUsedForDifferentExample:
         return "dead_letter", "label_conflict"
+    except (psycopg.DataError, psycopg.IntegrityError):
+        # The database refuses this message by itself (data it cannot store, a rule it
+        # enforces). It would fail the same way every time, so it must not block its lane.
+        # Connection and other database trouble is NOT caught: that is temporary.
+        return "dead_letter", "save_rejected"
     return ("saved" if created else "repeat"), None
 
 
@@ -91,13 +98,17 @@ def run(consumer, producer, save=save_example, should_stop=lambda: False):
                 raise RuntimeError(f"Kafka error: {message.error()}")
             outcome, reason = handle_message(message.key(), message.value(), save=save)
             if outcome == "dead_letter":
+                # flush() only says how many copies are still queued. A copy the broker
+                # refuses is reported through this callback, so the callback records it.
+                refused = []
                 producer.produce(
                     DEAD_LETTER_TOPIC,
                     key=message.key(),
                     value=message.value(),
                     headers=[("error", reason.encode("utf-8"))],
+                    on_delivery=lambda error, _message: refused.append(error) if error else None,
                 )
-                if producer.flush(30) != 0:
+                if producer.flush(30) != 0 or refused:
                     raise RuntimeError("dead-letter copy was not delivered")
             consumer.commit(message=message, asynchronous=False)
             log.info("offset %s: %s%s", message.offset(), outcome, f" ({reason})" if reason else "")
