@@ -30,6 +30,14 @@ RUN mkdir /app/model_cache && chown appuser /app/model_cache
 USER appuser
 RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')"
 
+# Check the downloaded model files against hashes written in this repo (model/model.sha256). If a
+# file is not exactly the one we pinned, or the model's version on the download site has changed,
+# the build FAILS here instead of quietly packing unknown files into the image. To move to a new
+# model version on purpose, change the pin file and the folder name below in the same pull request.
+COPY --chown=appuser model/model.sha256 /tmp/model.sha256
+RUN cd /app/model_cache/models--Qdrant--bge-small-en-v1.5-onnx-Q/snapshots/aa8f8b060edb00e03bfdd08813a2949946c8ba55 \
+    && sha256sum -c /tmp/model.sha256
+
 # Copy in the service code.
 COPY --chown=appuser app/ ./app/
 
