@@ -9,7 +9,9 @@
 -c requirements.txt
 
 # The test runner.
-pytest==9.1.1
+# Deliberately one version behind (2026-10-11) so that Dependabot has something to propose; remove this note
+# once its pull request has been seen and merged.
+pytest==9.1.0
 
 # Lets the tests call the service's web addresses without starting a server.
 httpx==0.28.1
