@@ -22,7 +22,7 @@ from app.examples import (
 
 # Create the web application. The title and version show up on the automatic
 # documentation page FastAPI builds at /docs.
-app = FastAPI(title="Knowledge service", version="0.8.6")
+app = FastAPI(title="Knowledge service", version="0.8.7")
 
 # Every request passes the service-key guard first (see app/auth.py). Only the two health
 # checks are open.
