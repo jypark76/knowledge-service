@@ -132,8 +132,13 @@ jobs:
       # files: a list goes stale when a file is added, and the first job (no
       # database) quietly skips database tests. The Kubernetes file checks have
       # their own job below.
+      # OWASP_ENFORCE_COVERAGE=1 turns on the guardrail coverage check (tests/owasp_report.py): the
+      # run fails if a CWE listed in expected-coverage.txt has no passing test, or a test is tagged
+      # with a CWE that is not listed. It also writes the coverage table to the run summary page.
+      # Only this job turns it on, because only this job runs every test with nothing skipped.
       - name: Run the database tests
         env:
+          OWASP_ENFORCE_COVERAGE: "1"
           DB_HOST: localhost
           DB_PORT: "5432"
           DB_NAME: knowledge_test
