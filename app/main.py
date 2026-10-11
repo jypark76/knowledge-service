@@ -3,13 +3,14 @@
 # graded example, list the saved ones and find the most similar ones.
 from uuid import UUID
 
-import psycopg
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.auth import require_service_key
 from app.db import database_is_ready
+from app.errors import catch_everything, fixed_http_error
 from app.examples import (
     LabelUsedForDifferentExample,
     NewExample,
@@ -21,11 +22,16 @@ from app.examples import (
 
 # Create the web application. The title and version show up on the automatic
 # documentation page FastAPI builds at /docs.
-app = FastAPI(title="Knowledge service", version="0.8.5")
+app = FastAPI(title="Knowledge service", version="0.8.6")
 
 # Every request passes the service-key guard first (see app/auth.py). Only the two health
 # checks are open.
 app.middleware("http")(require_service_key)
+
+# In plain English: every failure ends in a short, fixed reply (see app/errors.py). The catch-all is added AFTER
+# the service-key check, which makes it the outermost layer, so it also catches an error inside that check.
+app.middleware("http")(catch_everything)
+app.add_exception_handler(StarletteHTTPException, fixed_http_error)
 
 
 # In plain English: the kinds of error whose built-in wording is safe, because it
@@ -128,8 +134,6 @@ def create_example(example: NewExample):
             status_code=409,
             content={"problem": "This source_submission_id is already used for a different example"},
         )
-    except psycopg.Error:
-        return JSONResponse(status_code=503, content={"ok": False})
     return JSONResponse(status_code=201 if created else 200, content={"example_id": example_id})
 
 
@@ -137,21 +141,15 @@ def create_example(example: NewExample):
 # assignment_id must be a real UUID or FastAPI turns the request away (422).
 @app.get("/examples")
 def get_examples(assignment_id: UUID):
-    try:
-        return list_examples(assignment_id)
-    except psycopg.Error:
-        return JSONResponse(status_code=503, content={"ok": False})
+    return list_examples(assignment_id)
 
 
 # In plain English: finds the saved examples closest in meaning to some text. It
 # searches inside the assignment. Only when the caller sets fallback_to_all does an
 # assignment with no examples of its own borrow from every assignment. Bad input is turned away by FastAPI (422) before our
-# code runs; a database problem gives a plain 503 with no details. This is a
+# code runs; a database problem gives a plain 503 with no details (app/errors.py). This is a
 # POST only because the text to compare can be long, not because it saves
 # anything.
 @app.post("/examples/search")
 def search(request: SearchRequest):
-    try:
-        return search_examples(request)
-    except psycopg.Error:
-        return JSONResponse(status_code=503, content={"ok": False})
+    return search_examples(request)

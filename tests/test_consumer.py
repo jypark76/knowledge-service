@@ -236,6 +236,7 @@ def test_a_message_is_committed_only_after_it_is_saved():
     assert log == [("commit", 7)]
 
 
+@pytest.mark.owasp("A10", 252, 394)
 def test_a_database_failure_means_no_commit_and_the_loop_stops():
     def save(example):
         raise psycopg.OperationalError("down")
@@ -258,6 +259,7 @@ def test_a_bad_message_is_copied_to_the_dead_letter_topic_before_the_commit():
     assert log[2] == ("commit", 5)
 
 
+@pytest.mark.owasp("A10", 252, 394)
 def test_a_dead_letter_that_is_not_delivered_is_not_committed():
     log = []
     fake = FakeConsumer([FakeMessage(b"k", b"{oops", 5)], log)
@@ -268,6 +270,7 @@ def test_a_dead_letter_that_is_not_delivered_is_not_committed():
 
 # flush() only says how many copies are still queued. A refused copy is reported through the
 # delivery callback, so a refusal must stop the reader before the commit.
+@pytest.mark.owasp("A10", 252, 394)
 def test_a_dead_letter_the_broker_refused_is_not_committed():
     log = []
     fake = FakeConsumer([FakeMessage(b"k", b"{oops", 5)], log)
@@ -293,6 +296,7 @@ def test_messages_are_handled_in_order_each_committed_in_turn():
     assert [entry for entry in log if entry[0] == "commit"] == [("commit", 1), ("commit", 2), ("commit", 3)]
 
 
+@pytest.mark.owasp("A10", 252, 394)
 def test_a_kafka_error_stops_the_loop_without_a_commit():
     log = []
     fake = FakeConsumer([FakeMessage(None, None, 9, error="broker gone")], log)
