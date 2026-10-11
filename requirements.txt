@@ -258,9 +258,9 @@ confluent-kafka==2.16.0 \
     --hash=sha256:fca48bb1b929b9cffae3109f43b1fab64bbfe0ffaada94372ffbcaf41668abe3 \
     --hash=sha256:fd4961c17ccfb7e97bf3d8452fefa4163a66af1e079f21d43cf78b421767866b
     # via -r requirements.in
-fastapi==0.142.4 \
-    --hash=sha256:7fe2e254a0a948b88f432b02b8f627463285248233bba0998ed9640191e2ff57 \
-    --hash=sha256:8a651aa071a9f92c8217cca1d0b044bf9c326f336578be0a728a1a1f22ec52d2
+fastapi==0.143.0 \
+    --hash=sha256:1acffe48206a80917cf7dac21992b5c44b25384e8902bf745c1fd9dabcf6c51f \
+    --hash=sha256:3e9395fd35276425b61b516a31fdd7c77fe2af83e41b4da22e30696fb1304c5d
     # via -r requirements.in
 fastembed==0.9.0 \
     --hash=sha256:273d408edec8c0f161711d8f6e44e4a5b559d18e8edf6bf805415d55dc772846 \
