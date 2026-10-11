@@ -137,6 +137,7 @@ def test_search_never_returns_another_assignments_examples():
 # login and that reading works, so the refusals below mean "not allowed" and not
 # "login missing". Then it tries to change and to delete, and both must be
 # refused, and the example must still be intact.
+@pytest.mark.owasp("A01", 276, 732)
 def test_service_login_cannot_update_or_delete():
     assignment = new_assignment()
     save(assignment, "The mitochondria makes energy for the cell.", "A")
@@ -311,6 +312,7 @@ def test_unknown_assignment_gets_nothing_unless_the_caller_asks_to_borrow():
 # what it can change. First it proves the test is running as that limited login and that
 # connecting works, so the refusal below means "not allowed" and not "login missing". Then
 # it tries to create a table, which a login that may only read and add rows must be refused.
+@pytest.mark.owasp("A01", 276, 732)
 def test_limited_login_connects_but_cannot_create_tables():
     with connect() as connection:
         who = connection.execute("SELECT current_user").fetchone()[0]
