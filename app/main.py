@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.auth import require_service_key
 from app.db import database_is_ready
 from app.examples import (
     LabelUsedForDifferentExample,
@@ -20,7 +21,11 @@ from app.examples import (
 
 # Create the web application. The title and version show up on the automatic
 # documentation page FastAPI builds at /docs.
-app = FastAPI(title="Knowledge service", version="0.7.1")
+app = FastAPI(title="Knowledge service", version="0.8.0")
+
+# Every request passes the service-key guard first (see app/auth.py). Only the two health
+# checks are open.
+app.middleware("http")(require_service_key)
 
 
 # In plain English: the kinds of error whose built-in wording is safe, because it

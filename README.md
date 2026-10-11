@@ -53,13 +53,32 @@ Change 0001 adds `source_submission_id`: a label saying which submission an exam
 came from, with a rule that two examples cannot share one. Examples saved before it,
 and examples saved without a label, have none, and any number of those can exist.
 
+## The service key
+
+Every route except `GET /health` and `GET /ready` needs the header `Authorization: Bearer <key>`. The key is one long
+secret shared with the trusted callers (the other services). It lives in the Kubernetes Secret
+`knowledge-service-key` (made by hand, never in this repo) and reaches the web pod as the setting `SERVICE_KEYS`. The
+Kafka reader does not call the routes, so it does not get the key.
+
+- A missing or wrong key answers 401 with the same fixed reply every time. It never says what was wrong and never
+  repeats what was sent. The documentation pages are closed too.
+- If no usable key is configured the service answers 503 on every protected route. It never opens up.
+- A key shorter than 32 characters is not usable. Make one with `openssl rand -hex 32`.
+- The setting may list several keys separated by commas. To replace a key without downtime: add the new one next to the
+  old, switch the callers to it, then remove the old one.
+- New routes are protected by default. A test finds every route by asking the app, so a route added later cannot be
+  forgotten.
+
+One shared key says "a trusted caller", not "which person", and it travels as plain HTTP inside the cluster on the
+laptop. Real user login comes later.
+
 ## API
 
 | Call | What it does |
 |---|---|
 | `POST /examples` | Save an approved example and compute its embedding. It may carry an optional `source_submission_id`, a label for the submission it came from. A new example answers 201. The same labelled example sent again (for example a message delivered twice) answers 200 with the original's ID and saves nothing. A label already used by a different example answers 409. Without a label every call saves a new row, as before |
 | `GET /examples?assignment_id=...` | List the examples for one assignment (newest first, up to 100) |
-| `POST /examples/search` | Return the examples most similar in meaning to some text. It searches inside the assignment. If the assignment has no examples at all it returns nothing, unless the caller sets `fallback_to_all` to `true`, which borrows similar examples from every assignment. The flag is off by default, which protects against typos and accidents. It is not a security control, because it travels in the same request and the service has no authentication. Each result carries its `assignment_id` and a `same_assignment` flag, so the caller can tell borrowed examples from the assignment's own |
+| `POST /examples/search` | Return the examples most similar in meaning to some text. It searches inside the assignment. If the assignment has no examples at all it returns nothing, unless the caller sets `fallback_to_all` to `true`, which borrows similar examples from every assignment. The flag is off by default, which protects against typos and accidents. It is not a security control, because it travels in the same request and any holder of the service key can set it. Each result carries its `assignment_id` and a `same_assignment` flag, so the caller can tell borrowed examples from the assignment's own |
 | `GET /health` | Report whether the service is alive |
 | `GET /ready` | Report whether the service can reach its database |
 
@@ -183,7 +202,7 @@ for the rename command, what to rewrite, the one-time GitHub setup and the order
 
 ## Known limits
 
-- The `fallback_to_all` flag guards against typos and accidents, not against a caller who wants the data. It travels in the same unauthenticated request, so any caller that can reach the service can set it with any assignment ID and read other assignments' examples. Real protection needs authentication, or the caller checking that the assignment exists. The service is internal-only for now.
+- The `fallback_to_all` flag guards against typos and accidents, not against a caller who wants the data. It travels in the same request, so any caller that holds the service key can set it with any assignment ID and read other assignments' examples. The service key limits who can call at all; it does not limit which assignment a caller may read. Real protection needs per-caller rules, or the caller checking that the assignment exists. The service is internal-only for now.
 - Search uses pgvector's HNSW index with iterative scan switched on, which stops
   after 20000 scanned rows (`hnsw.max_scan_tuples`). A small assignment hidden
   behind tens of thousands of closer examples from other assignments could still

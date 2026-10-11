@@ -39,6 +39,7 @@ MADE_OUTSIDE = {
     ("ConfigMap", "knowledge-db-init"),
     ("ConfigMap", "knowledge-db-changelog"),
     ("Secret", "knowledge-db"),
+    ("Secret", "knowledge-service-key"),
 }
 
 
@@ -498,3 +499,22 @@ def test_the_reader_runs_the_reader_code_from_the_same_image(real_docs):
     settings = next(d for d in real_docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "knowledge-service-config")
     assert settings["data"]["KAFKA_BOOTSTRAP"] == "kafka.kafka.svc.cluster.local:9092"
     assert container["envFrom"] == [{"configMapRef": {"name": "knowledge-service-config"}}]
+
+
+# In plain English: the service key must reach the WEB service pod from the Kubernetes Secret
+# and never from a value written in the files, and the deploy script must stop with the create
+# command if that Secret does not exist yet. The Kafka reader does not call the routes, so it
+# must not hold the key.
+def test_the_service_key_comes_from_a_secret_never_from_the_files(real_docs):
+    service = next(d for d in real_docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "knowledge-service")
+    reader = next(d for d in real_docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "knowledge-consumer")
+    env = {item["name"]: item for item in containers_of(service)[0]["env"]}
+    key = env["SERVICE_KEYS"]
+    assert "value" not in key
+    assert key["valueFrom"]["secretKeyRef"] == {"name": "knowledge-service-key", "key": "keys"}
+    assert "SERVICE_KEYS" not in {item["name"] for item in containers_of(reader)[0]["env"]}
+    settings = next(d for d in real_docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "knowledge-service-config")
+    assert "SERVICE_KEYS" not in settings["data"]
+    script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    assert "kubectl get secret knowledge-service-key" in script
+    assert "kubectl create secret generic knowledge-service-key" in script
