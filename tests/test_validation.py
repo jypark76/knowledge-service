@@ -78,12 +78,14 @@ def test_save_rejects_oversize_grade():
     assert_refused(client.post("/examples", json=data), "grade")
 
 
+@pytest.mark.owasp("A10", 235)
 def test_save_rejects_extra_field():
     data = good_example()
     data["extra"] = "sneaky"
     assert_extra_field_refused(client.post("/examples", json=data))
 
 
+@pytest.mark.owasp("A10", 234)
 def test_save_rejects_missing_field():
     data = good_example()
     del data["reasoning"]
@@ -114,6 +116,7 @@ def test_search_rejects_limit_zero():
     assert_refused(client.post("/examples/search", json=data), "limit")
 
 
+@pytest.mark.owasp("A10", 235)
 def test_search_rejects_extra_field():
     data = good_search()
     data["extra"] = "sneaky"
@@ -187,6 +190,7 @@ def test_unknown_kinds_of_error_get_generic_wording():
 
 # In plain English: a caller can pick any name for an extra field, so the name is
 # caller data too. Using a secret-looking name shows whether it comes back.
+@pytest.mark.owasp("A10", 235)
 def test_extra_field_names_are_never_echoed():
     save_data = good_example()
     save_data["SECRET-MARKER-12345"] = "x"
