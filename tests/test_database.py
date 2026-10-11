@@ -24,8 +24,9 @@ from app.db import connect
 from app.embeddings import embed_text
 from app.examples import NewExample, _vector_text, save_example
 from app.main import app
+from conftest import AUTH_HEADERS
 
-client = TestClient(app)
+client = TestClient(app, headers=AUTH_HEADERS)
 
 
 # In plain English: every test in this file first passes the shared database guard
@@ -520,7 +521,7 @@ def test_eight_identical_saves_at_once_store_one_example():
     results = [None] * 8
 
     def worker(index):
-        local_client = TestClient(app)
+        local_client = TestClient(app, headers=AUTH_HEADERS)
         barrier.wait()
         try:
             results[index] = local_client.post(

@@ -8,8 +8,9 @@ from fastapi.testclient import TestClient
 
 from app.examples import NewExample
 from app.main import app
+from conftest import AUTH_HEADERS
 
-client = TestClient(app)
+client = TestClient(app, headers=AUTH_HEADERS)
 
 GOOD_ID = "11111111-1111-1111-1111-111111111111"
 
