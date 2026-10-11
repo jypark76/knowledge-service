@@ -79,6 +79,7 @@ def test_save_rejects_oversize_grade():
 
 
 @pytest.mark.owasp("A10", 235)
+@pytest.mark.owasp("A08", 915)
 def test_save_rejects_extra_field():
     data = good_example()
     data["extra"] = "sneaky"
@@ -117,6 +118,7 @@ def test_search_rejects_limit_zero():
 
 
 @pytest.mark.owasp("A10", 235)
+@pytest.mark.owasp("A08", 915)
 def test_search_rejects_extra_field():
     data = good_search()
     data["extra"] = "sneaky"
