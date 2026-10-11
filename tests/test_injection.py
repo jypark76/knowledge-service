@@ -65,6 +65,7 @@ def count_for(assignment_id):
 # and is never run. The control: the same call with plain text works, so a refusal here would mean
 # something other than the hostile text broke it.
 @pytest.mark.parametrize("field", ["student_work", "grade", "reasoning"])
+@pytest.mark.owasp("A05", 74, 76, 89, 99)
 def test_hostile_text_is_stored_and_read_back_exactly(field):
     assert save(new_assignment()).status_code == 201  # control: plain text works
     assignment = new_assignment()
@@ -79,6 +80,7 @@ def test_hostile_text_is_stored_and_read_back_exactly(field):
 
 # In plain English: text that looks like a command did not run: the table is still there, the other
 # examples are still there, and nothing was deleted.
+@pytest.mark.owasp("A05", 74, 76, 89, 99)
 def test_destructive_looking_text_does_not_destroy_anything():
     keeper = new_assignment()
     assert save(keeper, student_work="Keep me.").status_code == 201
@@ -90,6 +92,7 @@ def test_destructive_looking_text_does_not_destroy_anything():
 
 # In plain English: a "always true" trick in the text does not widen what a search or a list returns.
 # One assignment holds a trick example, another holds nothing, and the empty one must stay empty.
+@pytest.mark.owasp("A05", 74, 76, 89, 99)
 def test_an_always_true_trick_does_not_widen_a_list_or_a_search():
     holder, empty = new_assignment(), new_assignment()
     assert save(holder, student_work="x' OR '1'='1", grade="A' OR '1'='1").status_code == 201
@@ -101,6 +104,7 @@ def test_an_always_true_trick_does_not_widen_a_list_or_a_search():
 
 
 # In plain English: hostile search text is just text to compare. It does not break the search.
+@pytest.mark.owasp("A05", 74, 76, 89, 99)
 def test_hostile_search_text_runs_normally():
     assignment = new_assignment()
     assert save(assignment, student_work="Plain essay about rivers.").status_code == 201
@@ -115,6 +119,7 @@ def test_hostile_search_text_runs_normally():
 # way to smuggle a command into the query string, the search body or the source label. The refusal
 # is a 422, and the reply never repeats what was sent.
 @pytest.mark.parametrize("payload", ["11111111-1111-1111-1111-111111111111' OR '1'='1", "'; DROP TABLE examples; --", "1 OR 1=1"])
+@pytest.mark.owasp("A05", 74, 76, 89, 99)
 def test_ids_that_are_not_real_uuids_are_refused_without_being_repeated(payload):
     replies = [
         client.get("/examples", params={"assignment_id": payload}),
@@ -131,6 +136,7 @@ def test_ids_that_are_not_real_uuids_are_refused_without_being_repeated(payload)
 # In plain English: the same protection holds for messages that arrive through Kafka, which reach the
 # database through the same save routine. A hostile example is saved once, stored exactly and run as
 # nothing.
+@pytest.mark.owasp("A05", 74, 76, 89, 99)
 def test_hostile_text_in_a_kafka_message_is_stored_exactly():
     label, assignment = str(uuid.uuid4()), new_assignment()
     value = json.dumps({

@@ -4,6 +4,8 @@ import os
 
 import pytest
 
+import owasp_tags
+
 
 # In plain English: opt-in guard for tests that need a real database. With no database
 # settings the tests quietly skip, so a normal run on a laptop still works. In the
@@ -27,3 +29,13 @@ def require_test_database():
 TEST_KEY = "test-only-key-0123456789abcdef0123456789"
 AUTH_HEADERS = {"Authorization": f"Bearer {TEST_KEY}"}
 os.environ["SERVICE_KEYS"] = TEST_KEY
+
+
+# In plain English: before any test runs, check every OWASP tag. A malformed tag (wrong category, a
+# CWE number that is not a number, a repeat) stops the whole run with a message naming the test,
+# because a wrong tag would show a guardrail as covered when it is not.
+def pytest_collection_modifyitems(items):
+    try:
+        owasp_tags.check_items(items)
+    except ValueError as problem:
+        raise pytest.UsageError(f"bad owasp tag: {problem}") from None

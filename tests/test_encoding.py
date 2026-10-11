@@ -53,6 +53,7 @@ def assert_json_reply(response):
     return response.json()  # decodes, or the test fails
 
 
+@pytest.mark.owasp("A05", 115, 116, 159)
 def test_error_replies_are_labelled_json_and_decode():
     for reply in (
         bare.get("/examples"),
@@ -65,6 +66,7 @@ def test_error_replies_are_labelled_json_and_decode():
 
 
 @pytest.mark.usefixtures("require_test_database")
+@pytest.mark.owasp("A05", 115, 116, 159)
 def test_success_replies_are_labelled_json_and_html_like_text_stays_data():
     assignment = str(uuid.uuid4())
     saved = bare.post("/examples", json=body(assignment_id=assignment, student_work="<script>alert(1)</script>"))
@@ -80,6 +82,7 @@ def test_success_replies_are_labelled_json_and_html_like_text_stays_data():
 
 @pytest.mark.usefixtures("require_test_database")
 @pytest.mark.parametrize("special", SPECIALS)
+@pytest.mark.owasp("A05", 115, 116, 159)
 def test_unusual_characters_are_stored_exactly_or_refused_never_a_crash(special):
     assignment = str(uuid.uuid4())
     for field in ("student_work", "reasoning"):
@@ -91,6 +94,7 @@ def test_unusual_characters_are_stored_exactly_or_refused_never_a_crash(special)
 
 
 @pytest.mark.usefixtures("require_test_database")
+@pytest.mark.owasp("A05", 115, 116, 159)
 def test_a_half_written_character_and_a_null_are_refused_with_a_normal_422():
     for escaped in ('"\\ud800"', '"a\\u0000b"', '"\\udfff"'):
         raw = ('{"assignment_id": "%s", "student_work": %s, "grade": "A", "reasoning": "r"}' % (uuid.uuid4(), escaped)).encode()
@@ -101,6 +105,7 @@ def test_a_half_written_character_and_a_null_are_refused_with_a_normal_422():
     assert control.status_code == 201
 
 
+@pytest.mark.owasp("A05", 115, 116, 159)
 def test_a_request_that_is_not_valid_utf8_or_not_json_is_a_client_error_not_a_crash():
     for raw in (b'{"student_work": "\xff\xfe"}', b"{not json", b"", b"[1,2,3]", b'"just a string"'):
         reply = bare.post("/examples", content=raw, headers={"Content-Type": "application/json"})
@@ -116,6 +121,7 @@ def message(text):
     return data["source_submission_id"].encode(), text.replace("LABEL", data["source_submission_id"]).replace("ASSIGN", str(uuid.uuid4())).encode()
 
 
+@pytest.mark.owasp("A05", 115, 116, 159)
 def test_a_message_that_repeats_a_field_is_refused_as_invalid_json():
     for text in (
         '{"schema_version":1,"source_submission_id":"LABEL","assignment_id":"ASSIGN","student_work":"a","grade":"A","grade":"F","reasoning":"r"}',
@@ -128,6 +134,7 @@ def test_a_message_that_repeats_a_field_is_refused_as_invalid_json():
     assert handle_message(control_key, control, save=fake_save_new) == ("saved", None)
 
 
+@pytest.mark.owasp("A05", 115, 116, 159)
 def test_a_message_with_nan_or_infinity_is_refused_as_invalid_json():
     for token in ("NaN", "Infinity", "-Infinity"):
         text = '{"schema_version":1,"source_submission_id":"LABEL","assignment_id":"ASSIGN","student_work":"a","grade":%s,"reasoning":"r"}' % token
@@ -135,6 +142,7 @@ def test_a_message_with_nan_or_infinity_is_refused_as_invalid_json():
         assert handle_message(key, value, save=fake_save_new) == ("dead_letter", "invalid_json"), token
 
 
+@pytest.mark.owasp("A05", 115, 116, 159)
 def test_nested_repeats_are_refused_too():
     text = '{"schema_version":1,"source_submission_id":"LABEL","assignment_id":"ASSIGN","student_work":{"a":1,"a":2},"grade":"A","reasoning":"r"}'
     key, value = message(text)
@@ -144,6 +152,7 @@ def test_nested_repeats_are_refused_too():
 # A half-written character or a null inside a Kafka message must be refused as a bad field. If it slipped
 # through, saving it would crash the reader (the database driver cannot encode it) and the same message
 # would crash it again after every restart.
+@pytest.mark.owasp("A05", 115, 116, 159)
 def test_a_half_written_character_or_a_null_in_a_message_is_a_bad_field_not_a_crash():
     for escaped in ("a\\ud800b", "\\udfff", "a\\u0000b"):
         text = '{"schema_version":1,"source_submission_id":"LABEL","assignment_id":"ASSIGN","student_work":"%s","grade":"A","reasoning":"r"}' % escaped

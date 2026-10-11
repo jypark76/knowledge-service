@@ -33,6 +33,7 @@ def refusals(caplog):
     return [r for r in caplog.records if r.name == auth.LOGGER_NAME]
 
 
+@pytest.mark.owasp("A09", 221, 223, 778)
 def test_each_kind_of_refusal_is_logged_once_with_its_reason(caplog):
     cases = {
         "missing": {},
@@ -57,6 +58,7 @@ def test_a_service_with_no_key_configured_logs_that_reason(caplog, monkeypatch):
     assert [("reason=not_configured" in r.getMessage()) for r in refusals(caplog)] == [True]
 
 
+@pytest.mark.owasp("A09", 532)
 def test_the_log_line_never_contains_the_key_or_the_header(caplog):
     sent = "Bearer " + "s3cret-" + "k" * 40
     with caplog.at_level(logging.DEBUG):
@@ -94,6 +96,7 @@ def test_requests_that_pass_and_the_health_checks_are_not_logged_as_refusals(cap
     assert refusals(caplog) == []
 
 
+@pytest.mark.owasp("A09", 221, 223, 778)
 def test_a_flood_of_refusals_is_logged_up_to_a_limit_then_summarized(caplog, fresh_window):
     with caplog.at_level(logging.INFO):
         for _ in range(auth.REFUSAL_LOG_LIMIT + 30):
