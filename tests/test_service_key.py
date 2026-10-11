@@ -33,6 +33,7 @@ def call(method, path, headers=None):
     return bare.request(method, path, headers=headers or {})
 
 
+@pytest.mark.owasp("A01", 862, 749)
 def test_the_route_list_is_not_empty_and_includes_the_open_ones():
     paths = {path for _, path in all_routes()}
     assert OPEN_PATHS <= paths
@@ -59,6 +60,7 @@ BAD_HEADERS = {
 }
 
 
+@pytest.mark.owasp("A01", 862, 424, 425)
 def test_every_protected_route_refuses_every_kind_of_bad_header():
     for method, path in protected_routes():
         for name, headers in BAD_HEADERS.items():
@@ -67,6 +69,7 @@ def test_every_protected_route_refuses_every_kind_of_bad_header():
             assert response.headers["www-authenticate"] == "Bearer"
 
 
+@pytest.mark.owasp("A01", 425)
 def test_the_refusal_is_identical_for_every_failure_and_repeats_nothing():
     bodies = {call("GET", "/examples", headers).text for headers in BAD_HEADERS.values()}
     assert len(bodies) == 1
@@ -74,6 +77,7 @@ def test_the_refusal_is_identical_for_every_failure_and_repeats_nothing():
     assert OTHER_KEY not in call("GET", "/examples", sent).text
 
 
+@pytest.mark.owasp("A01", 749, 497)
 def test_the_documentation_pages_are_closed_too():
     for path in ("/docs", "/openapi.json", "/redoc"):
         assert call("GET", path).status_code == 401, path
