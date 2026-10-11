@@ -63,11 +63,16 @@ def handle_message(key, value, save=save_example):
     except ValidationError:
         return "dead_letter", "invalid_field"
 
+    # The key must be the submission ID written the normal way (lowercase, with hyphens, or the same in
+    # capitals). Python's own UUID reader also accepts odd forms (a trailing newline, spaces, a plus
+    # sign, a 0x prefix, braces, no hyphens), which have no business in a key and could carry a line
+    # break into a log line.
     try:
-        key_label = uuid.UUID(key.decode("utf-8"))
+        key_text = key.decode("utf-8")
+        key_label = uuid.UUID(key_text)
     except (AttributeError, UnicodeDecodeError, ValueError):
         return "dead_letter", "key_mismatch"
-    if key_label != message.source_submission_id:
+    if key_text.lower() != str(key_label) or key_label != message.source_submission_id:
         return "dead_letter", "key_mismatch"
 
     try:
