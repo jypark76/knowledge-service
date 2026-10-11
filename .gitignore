@@ -29,3 +29,6 @@ dist/
 .venv/
 .pytest_cache/
 .model_cache/
+
+# Type checker cache
+.mypy_cache/

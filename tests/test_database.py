@@ -138,6 +138,7 @@ def test_search_never_returns_another_assignments_examples():
 # "login missing". Then it tries to change and to delete, and both must be
 # refused, and the example must still be intact.
 @pytest.mark.owasp("A01", 276, 732)
+@pytest.mark.owasp("A06", 266, 269, 642)
 def test_service_login_cannot_update_or_delete():
     assignment = new_assignment()
     save(assignment, "The mitochondria makes energy for the cell.", "A")
@@ -313,6 +314,7 @@ def test_unknown_assignment_gets_nothing_unless_the_caller_asks_to_borrow():
 # connecting works, so the refusal below means "not allowed" and not "login missing". Then
 # it tries to create a table, which a login that may only read and add rows must be refused.
 @pytest.mark.owasp("A01", 276, 732)
+@pytest.mark.owasp("A06", 266, 269)
 def test_limited_login_connects_but_cannot_create_tables():
     with connect() as connection:
         who = connection.execute("SELECT current_user").fetchone()[0]
@@ -487,6 +489,7 @@ def competing_save(assignment, label, grade="A"):
 # In plain English: the SAME example lands first. The service's own write finds the
 # label taken, looks again, sees its own example already saved and answers 200 with
 # the competitor's ID, as for a repeat. There is still exactly one row.
+@pytest.mark.owasp("A06", 362)
 def test_a_save_that_loses_the_race_to_the_same_example_is_treated_as_a_repeat(monkeypatch):
     assignment, label = new_assignment(), str(uuid.uuid4())
     winner = []
@@ -502,6 +505,7 @@ def test_a_save_that_loses_the_race_to_the_same_example_is_treated_as_a_repeat(m
 
 # In plain English: a DIFFERENT example lands first. The service looks again and
 # answers 409. The competitor's example is the one that stays, and there is one row.
+@pytest.mark.owasp("A06", 362)
 def test_a_save_that_loses_the_race_to_a_different_example_gets_a_conflict(monkeypatch):
     assignment, label = new_assignment(), str(uuid.uuid4())
     state = plant_collision(monkeypatch, lambda: competing_save(assignment, label, grade="B"))
@@ -518,6 +522,7 @@ def test_a_save_that_loses_the_race_to_a_different_example_gets_a_conflict(monke
 # In plain English: eight copies of the same message arrive at the same instant.
 # Exactly one is saved (201), the other seven are recognised (200) and all eight get
 # the same example ID. One row exists afterwards. This is a real race, not a planted one.
+@pytest.mark.owasp("A06", 362)
 def test_eight_identical_saves_at_once_store_one_example():
     assignment, label = new_assignment(), str(uuid.uuid4())
     barrier = threading.Barrier(8)
