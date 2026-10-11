@@ -44,6 +44,13 @@ spec:
       labels:
         app: knowledge-db
     spec:
+      # No Kubernetes API token: this pod never talks to the Kubernetes API, and a stolen token would be a
+      # free key to it.
+      automountServiceAccountToken: false
+      securityContext:
+        # The container runtime's default filter blocks dozens of rarely used system calls.
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: postgres
           # Same database image you used with Docker: Postgres plus pgvector.
