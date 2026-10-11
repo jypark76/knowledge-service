@@ -97,6 +97,7 @@ def bad_cases():
 
 
 @pytest.mark.parametrize("name", sorted(bad_cases()))
+@pytest.mark.owasp("A05", 20)
 def test_a_bad_message_is_dead_lettered_with_its_code_and_never_saved(name):
     key, value, reason = bad_cases()[name]
     assert handle_message(key, value, save=never_save) == ("dead_letter", reason)
@@ -133,6 +134,7 @@ def test_a_database_failure_is_not_swallowed():
         handle_message(*keyed(good_value()), save=save)
 
 
+@pytest.mark.owasp("A09", 532)
 def test_the_reason_never_contains_the_student_text():
     data = good_value(student_work="SECRET-MARKER", grade="")
     assert "SECRET-MARKER" not in repr(handle_message(*keyed(data), save=never_save))

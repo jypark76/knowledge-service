@@ -10,6 +10,8 @@ from app.examples import NewExample
 from app.main import app
 from conftest import AUTH_HEADERS
 
+import pytest
+
 client = TestClient(app, headers=AUTH_HEADERS)
 
 GOOD_ID = "11111111-1111-1111-1111-111111111111"
@@ -139,6 +141,7 @@ def test_refusal_does_not_echo_input():
 # cannot be stored by Postgres. It must be turned away at the door as bad input
 # (422), and never reach the database and come back as a 503 "try again later",
 # which a client would retry forever.
+@pytest.mark.owasp("A05", 20)
 def test_save_rejects_null_characters_in_every_text_field():
     for field in ("student_work", "grade", "reasoning"):
         data = good_example()

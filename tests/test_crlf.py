@@ -53,6 +53,7 @@ def assert_headers_clean(response):
 
 # ---------- Part 1: reply headers ----------
 
+@pytest.mark.owasp("A05", 93, 113)
 def test_line_breaks_in_requests_never_reach_reply_headers_on_the_refusal_paths():
     replies = [
         bare.get("/examples", params={"assignment_id": ATTACK}),
@@ -104,6 +105,7 @@ def run_reader(messages, caplog):
     return log
 
 
+@pytest.mark.owasp("A09", 117)
 def test_hostile_keys_and_values_never_put_line_breaks_into_the_log(caplog):
     good = good_value()
     messages = [FakeMessage(key.encode(), json.dumps(good_value(source_submission_id=key)).encode(), index)

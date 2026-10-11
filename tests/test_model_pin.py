@@ -10,6 +10,8 @@
 import re
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 DOCKERFILE = (ROOT / "Dockerfile").read_text(encoding="utf-8")
 PIN = ROOT / "model" / "model.sha256"
@@ -22,6 +24,7 @@ def pin_lines():
     return [line for line in PIN.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+@pytest.mark.owasp("A05", 114)
 def test_the_pin_file_lists_every_model_file_with_a_sha256_hash():
     lines = pin_lines()
     found = {}
@@ -33,6 +36,7 @@ def test_the_pin_file_lists_every_model_file_with_a_sha256_hash():
     assert len(set(found.values())) == len(found), "two files share one hash, which is almost certainly a mistake"
 
 
+@pytest.mark.owasp("A05", 114)
 def test_the_dockerfile_checks_the_model_files_against_the_pin_before_the_code_is_copied_in():
     download = DOCKERFILE.index("TextEmbedding('BAAI/bge-small-en-v1.5')")
     copy_pin = DOCKERFILE.index("COPY --chown=appuser model/model.sha256")
@@ -41,17 +45,20 @@ def test_the_dockerfile_checks_the_model_files_against_the_pin_before_the_code_i
     assert download < copy_pin < check < copy_code
 
 
+@pytest.mark.owasp("A05", 114)
 def test_the_check_runs_inside_the_exact_model_version_folder():
     # A new model version lands in a different folder, so the build fails until the pin is updated on purpose.
     assert re.search(r"snapshots/[0-9a-f]{40}", DOCKERFILE)
     assert "cd /app/model_cache/" in DOCKERFILE
 
 
+@pytest.mark.owasp("A05", 114)
 def test_the_pin_file_is_not_left_out_of_the_image_build():
     ignored = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
     assert "model" not in [line.strip().rstrip("/") for line in ignored]
 
 
+@pytest.mark.owasp("A05", 114)
 def test_the_model_name_in_the_code_matches_the_name_in_the_dockerfile():
     code = (ROOT / "app" / "embeddings.py").read_text(encoding="utf-8")
     assert 'MODEL_NAME = "BAAI/bge-small-en-v1.5"' in code
