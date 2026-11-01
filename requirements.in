@@ -23,7 +23,7 @@ fastembed==0.9.0
 
 # The Kafka client the reader (app/consumer.py) uses to take approved examples off the
 # queue. Pinned like the rest.
-confluent-kafka==2.16.0
+confluent-kafka==2.16.1
 
 # The tool that installs the libraries. It is pinned too, so the image never builds with whatever
 # version of pip the base image happened to ship.
